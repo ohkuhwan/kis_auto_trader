@@ -200,6 +200,9 @@ class SellProcess:
                                   self.symbol_label(symbol, (self.store.get_position(symbol) or {}).get("name", "")), qty, order_mode, reason, order.order_no)
                 self.telegram.send(f"매도 주문 접수\n종목={self.symbol_label(symbol, (self.store.get_position(symbol) or {}).get('name', ''))}\n수량={qty}\n방식={order_mode}\n사유={reason}\n주문번호={order.order_no}")
             except Exception as exc:
+                if getattr(self.orders, "account_order_locked", False):
+                    log.critical("계좌 전체 주문 잠금으로 SELL 제출 중단: %s", self.symbol_label(symbol, (self.store.get_position(symbol) or {}).get("name", "")))
+                    return reconciled_immediately
                 no_broker_position = is_no_broker_position_error(exc)
                 retry_sec = self.sell_retry_delay(exc, self.settings.sell_retry_cooldown_sec)
                 if not self.orders.pending_for_symbol(symbol):
@@ -298,6 +301,9 @@ class SellProcess:
                                   self.symbol_label(symbol, (self.store.get_position(symbol) or {}).get("name", "")), qty, order_mode, priority, reason, order.order_no)
                 self.telegram.send(f"실시간 매도 주문 접수\n종목={self.symbol_label(symbol, (self.store.get_position(symbol) or {}).get('name', ''))}\n수량={qty}\n방식={order_mode}\n사유={reason}\n주문번호={order.order_no}")
             except Exception as exc:
+                if getattr(self.orders, "account_order_locked", False):
+                    log.critical("계좌 전체 주문 잠금으로 실시간 SELL 제출 중단: symbol=%s", self.symbol_label(symbol))
+                    continue
                 retry_sec = self.sell_retry_delay(exc, self.settings.sell_retry_cooldown_sec)
                 pos = self.store.get_position(symbol)
                 if pos and not self.orders.pending_for_symbol(symbol):
