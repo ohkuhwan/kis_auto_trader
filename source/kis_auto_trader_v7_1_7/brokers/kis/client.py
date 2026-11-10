@@ -434,8 +434,8 @@ class KisApi:
                     raise AmbiguousOrderError(f"{method} {path} HTTP {response.status_code}: 주문 접수 여부를 조회해야 합니다. 응답={_redact_sensitive_text(response.text[:300])}")
                 if attempt >= safe_retry:
                     raise KisApiError(f"HTTP {response.status_code}: {_redact_sensitive_text(response.text[:500])}",
-                                  msg_cd=msg_cd, msg1=_redact_sensitive_text(http_error_payload.get("msg1", "")),
-                                  http_status=response.status_code)
+                                      msg_cd=msg_cd, msg1=_redact_sensitive_text(error_payload.get("msg1", "")),
+                                      http_status=response.status_code)
                 retry_after = response.headers.get("Retry-After", "")
                 try:
                     delay = float(retry_after)
@@ -461,7 +461,9 @@ class KisApi:
                         f"KIS 현금매수 한도 부족 명시 거절: msg_cd={msg_cd} msg={safe_msg1}",
                         msg_cd=msg_cd, msg1=safe_msg1,
                     )
-                raise KisApiError(f"HTTP {response.status_code}: {_redact_sensitive_text(response.text[:500])}")
+                raise KisApiError(f"HTTP {response.status_code}: {_redact_sensitive_text(response.text[:500])}",
+                                  msg_cd=msg_cd, msg1=_redact_sensitive_text(http_error_payload.get("msg1", "")),
+                                  http_status=response.status_code)
             try:
                 data = response.json()
             except ValueError as exc:
