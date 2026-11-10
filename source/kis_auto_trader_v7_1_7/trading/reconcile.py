@@ -388,6 +388,8 @@ def cancel_all_open_orders(api, orders, confirm_timeout_sec: int = 60, poll_sec:
     orders.sync_open_orders(rows)
     attempts: dict[str, int] = {}
     for pending in orders.snapshot():
+        if getattr(orders, "account_order_locked", False):
+            break
         if pending.remaining_qty <= 0:
             continue
         try:
@@ -417,6 +419,8 @@ def cancel_all_open_orders(api, orders, confirm_timeout_sec: int = 60, poll_sec:
             # 재조회에서도 미체결이면 KIS 상태가 아직 열려 있는 것이므로 취소를 한 번 더 시도합니다.
             open_numbers = {str(_first(r, "odno", "ODNO", "order_no", default="")).strip() for r in rows}
             for pending in orders.snapshot():
+                if getattr(orders, "account_order_locked", False):
+                    break
                 if pending.order_no in open_numbers and attempts.get(pending.order_no, 0) < 2:
                     try:
                         orders.request_cancel(pending)
