@@ -1,0 +1,62 @@
+name: Validate V7.1.7 development source
+
+on:
+  push:
+    branches: [v7.1.7-dev]
+    paths:
+      - "source/kis_auto_trader_v7_1_7/**"
+      - ".github/workflows/validate-v717-dev.yml"
+      - "test-overrides/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "source/kis_auto_trader_v7_1_7/**"
+      - ".github/workflows/validate-v717-dev.yml"
+      - "test-overrides/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source/kis_auto_trader_v7_1_7
+    env:
+      KIS_PAPER: "true"
+      KIS_ENABLE_TRADING: "false"
+      KIS_TEST_MODE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: source/kis_auto_trader_v7_1_7/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Apply test-only environment fixture overrides
+        run: |
+          cp ../../test-overrides/tests/test_monitoring_scripts.py tests/test_monitoring_scripts.py
+          cp ../../test-overrides/tests/test_v716_improvements.py tests/test_v716_improvements.py
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Check shell syntax
+        run: |
+          bash -n monitoring/watchdog.sh
+          bash -n scripts/setup.sh
+          bash -n scripts/start.sh
+          bash -n scripts/stop.sh
+
+      - name: Run complete test suite
+        run: pytest -q
