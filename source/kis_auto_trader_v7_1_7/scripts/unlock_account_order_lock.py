@@ -21,6 +21,10 @@ from zoneinfo import ZoneInfo
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+
+load_dotenv(PROJECT_ROOT / ".env")
+
 from config.paths import runtime_path
 
 
