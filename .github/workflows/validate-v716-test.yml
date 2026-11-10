@@ -29,7 +29,11 @@ jobs:
           import hashlib, json, pathlib, sys
           root = pathlib.Path(".")
           manifest_path = pathlib.Path("../V7.1.6-EXTRACTION-MANIFEST.json")
-          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          raw_manifest = manifest_path.read_text(encoding="utf-8")
+          # The extraction workflow emitted a literal backslash-n suffix.
+          if raw_manifest.endswith("\\n"):
+              raw_manifest = raw_manifest[:-2]
+          manifest = json.loads(raw_manifest)
           errors = []
           total = 0
           for item in manifest["files"]:
