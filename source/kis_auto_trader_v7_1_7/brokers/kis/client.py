@@ -29,7 +29,15 @@ from .rate_limiter import RateLimiter
 
 
 class KisApiError(RuntimeError):
-    """KIS API 호출 실패를 나타냅니다."""
+    """KIS API 호출 실패를 나타내며, 명시 응답의 오류 코드를 보존합니다."""
+    def __init__(self, message: str, *, msg_cd: str = "", msg1: str = "", http_status: int | None = None):
+        super().__init__(message)
+        self.msg_cd = str(msg_cd or "").strip().upper()
+        self.msg1 = str(msg1 or "")
+        self.http_status = http_status
+
+
+_ACCOUNT_CONTEXT_ERROR_CODES = {"40910000", "IGW00002", "90070000"}
 
 
 class AmbiguousOrderError(KisApiError):
@@ -109,6 +117,8 @@ class KisApi:
     def __init__(self, settings: Settings):
         """HTTP 세션, 토큰 캐시, 호출 제한기를 초기화합니다."""
         self.s = settings
+        # OrderManager가 등록하는 callback으로, 계좌/인증 단위 오류를 주문 잠금에 전달합니다.
+        self.account_error_handler = None
         self.session = requests.Session()
         self.token = ""
         self.token_expire_at = 0.0
@@ -116,9 +126,14 @@ class KisApi:
         # REST access token과 WebSocket approval_key는 동일 JSON 파일에 저장합니다.
         # 환경/앱키가 다르면 캐시를 재사용하지 않아 모의·실전 키 혼용을 방지합니다.
         self.token_cache_path = runtime_path("token_cache")
-        self._credential_fingerprint = hashlib.sha256(
-            f"{settings.api_base}|{settings.app_key}".encode("utf-8")
-        ).hexdigest()
+        # 계좌·상품코드·HTS ID 또는 App Secret이 바뀌면 이전 REST/WS 인증 캐시를 재사용하지 않습니다.
+        # 원문 비밀값은 fingerprint에만 해시로 반영하며 로그/캐시에 저장하지 않습니다.
+        credential_context = "|".join((
+            str(settings.api_base), str(settings.app_key),
+            hashlib.sha256(str(settings.app_secret).encode("utf-8")).hexdigest(),
+            str(settings.cano), str(settings.acnt_prdt_cd), str(settings.hts_id),
+        ))
+        self._credential_fingerprint = hashlib.sha256(credential_context.encode("utf-8")).hexdigest()
         self._ws_approval_expire_at = 0.0
         self._token_retry_after = 0.0
         self.limiter = RateLimiter(settings.max_calls_per_sec, settings.max_calls_per_min, settings.rate_limit_safety_margin)
@@ -291,6 +306,18 @@ class KisApi:
             return 10  # 일봉/전략 데이터
         return 5
 
+    def _notify_account_context_error(self, msg_cd: str, msg1: str, method: str, path: str) -> None:
+        """계좌/인증 단위 오류를 주문 관리자에 전달합니다. callback 실패가 원본 API 오류를 덮지 않습니다."""
+        code = str(msg_cd or "").strip().upper()
+        handler = getattr(self, "account_error_handler", None)
+        if code not in _ACCOUNT_CONTEXT_ERROR_CODES or not callable(handler):
+            return
+        try:
+            handler(msg_cd=code, msg1=str(msg1 or ""), method=str(method), path=str(path))
+        except Exception as exc:
+            log.critical("계좌 주문 잠금 callback 실패: msg_cd=%s method=%s path=%s error=%s",
+                         code, method, path, type(exc).__name__)
+
     def _request(self, method: str, path: str, *, tr_id: str, params=None, body=None, retry: int | None = None) -> dict:
         """REST 요청을 보냅니다. 조회만 자동 재시도하고 주문 POST는 중복 제출 방지를 위해 재시도하지 않습니다."""
         method = method.upper().strip()
@@ -371,6 +398,8 @@ class KisApi:
                 except (ValueError, AttributeError):
                     error_payload = {}
                 msg_cd = str(error_payload.get("msg_cd", "")).strip().upper()
+                if msg_cd in _ACCOUNT_CONTEXT_ERROR_CODES:
+                    self._notify_account_context_error(msg_cd, error_payload.get("msg1", ""), method, path)
                 if response.status_code == 429:
                     try:
                         retry_after_sec = float(response.headers.get("Retry-After", "5") or 5)
@@ -398,11 +427,15 @@ class KisApi:
                         raise InsufficientBuyingPowerError(
                             f"KIS 현금매수 한도 부족 명시 거절: msg_cd={msg_cd} msg={error_payload.get('msg1')}",
                             msg_cd=msg_cd, msg1=_redact_sensitive_text(error_payload.get("msg1", "")))
-                    raise KisApiError(f"KIS 명시 거절 HTTP {response.status_code}: rt_cd={error_payload.get('rt_cd')} msg={_redact_sensitive_text(error_payload.get('msg1'))} msg_cd={msg_cd}")
+                    raise KisApiError(f"KIS 명시 거절 HTTP {response.status_code}: rt_cd={error_payload.get('rt_cd')} msg={_redact_sensitive_text(error_payload.get('msg1'))} msg_cd={msg_cd}",
+                                      msg_cd=msg_cd, msg1=_redact_sensitive_text(error_payload.get("msg1", "")),
+                                      http_status=response.status_code)
                 if method not in {"GET", "HEAD"}:
                     raise AmbiguousOrderError(f"{method} {path} HTTP {response.status_code}: 주문 접수 여부를 조회해야 합니다. 응답={_redact_sensitive_text(response.text[:300])}")
                 if attempt >= safe_retry:
-                    raise KisApiError(f"HTTP {response.status_code}: {_redact_sensitive_text(response.text[:500])}")
+                    raise KisApiError(f"HTTP {response.status_code}: {_redact_sensitive_text(response.text[:500])}",
+                                  msg_cd=msg_cd, msg1=_redact_sensitive_text(http_error_payload.get("msg1", "")),
+                                  http_status=response.status_code)
                 retry_after = response.headers.get("Retry-After", "")
                 try:
                     delay = float(retry_after)
@@ -415,6 +448,9 @@ class KisApi:
                     http_error_payload = response.json()
                 except (ValueError, AttributeError):
                     http_error_payload = {}
+                msg_cd = str(http_error_payload.get("msg_cd", "")).strip().upper()
+                if msg_cd in _ACCOUNT_CONTEXT_ERROR_CODES:
+                    self._notify_account_context_error(msg_cd, http_error_payload.get("msg1", ""), method, path)
                 if (method == "POST" and path.endswith("/trading/order-cash")
                         and tr_id in {"VTTC0012U", "TTTC0012U"}
                         and str(http_error_payload.get("rt_cd", "")) not in ("", "0", "None")
@@ -435,6 +471,8 @@ class KisApi:
             if data.get("rt_cd") not in (None, "0"):
                 msg_cd = str(data.get("msg_cd", "")).strip().upper()
                 safe_msg1 = _redact_sensitive_text(data.get("msg1", ""))
+                if msg_cd in _ACCOUNT_CONTEXT_ERROR_CODES:
+                    self._notify_account_context_error(msg_cd, safe_msg1, method, path)
                 message = f"KIS error rt_cd={data.get('rt_cd')} msg={safe_msg1} msg_cd={msg_cd}"
                 if _is_rate_limit_payload(data):
                     # EGW00201/EGW00215는 명시적인 호출 제한 거절입니다.
@@ -448,7 +486,7 @@ class KisApi:
                         and _is_buying_power_rejection(data)):
                     raise InsufficientBuyingPowerError(
                         message, msg_cd=msg_cd, msg1=safe_msg1)
-                raise KisApiError(message)
+                raise KisApiError(message, msg_cd=msg_cd, msg1=safe_msg1, http_status=response.status_code)
             data["_tr_cont"] = response.headers.get("tr_cont", "")
             return data
         raise KisApiError("API 호출 실패")
@@ -567,9 +605,24 @@ class KisApi:
             return [dict(row) for row in self._condition_titles_cache]
 
     def condition_result(self, seq: str) -> list[dict]:
-        """HTS 조건 하나의 종목 결과를 조회합니다."""
-        data = self._request("GET", "/uapi/domestic-stock/v1/quotations/psearch-result", tr_id="HHKST03900400", params={"user_id": self.s.hts_id, "seq": seq})
-        return data.get("output2") or []
+        """HTS 조건 하나의 종목 결과를 조회합니다.
+
+        KIS는 검색 결과가 0건인 경우에도 rt_cd=1 / MCA05918을 반환할 수 있습니다.
+        이 코드는 조건검색 장애가 아니라 빈 결과로 정규화합니다. seq="0"도 유효한 값이므로
+        임의로 거부하거나 다른 seq로 대체하지 않습니다.
+        """
+        try:
+            data = self._request("GET", "/uapi/domestic-stock/v1/quotations/psearch-result",
+                                 tr_id="HHKST03900400", params={"user_id": self.s.hts_id, "seq": str(seq)})
+        except KisApiError as exc:
+            if getattr(exc, "msg_cd", "") == "MCA05918":
+                log.info("HTS 조건검색 결과 0건(정상 빈 결과): seq=%s msg_cd=MCA05918", seq)
+                return []
+            raise
+        rows = data.get("output2") or []
+        if not isinstance(rows, list):
+            raise KisApiError(f"HTS 조건검색 결과 output2 형식 오류: seq={seq}")
+        return rows
 
     def find_condition_seq(self, condition_name: str) -> str:
         """조건명과 정확히 일치하는 seq를 반환합니다."""
