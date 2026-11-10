@@ -146,6 +146,38 @@ PYCODE
   fi
   if [[ "$calendar_rc" -ne 0 ]]; then log "WATCHDOG_OUTCOME status=failed reason=holiday_calendar_invalid date=$TODAY file=$CALENDAR_FILE detail=${calendar_result//$'\n'/; } fail_closed=1"; exit 1; fi
 fi
+# A persistent account/API order lock is a trading-degraded state, not a dead process.
+# Do not restart the trader or report healthy while the operator must verify the KIS account.
+ACCOUNT_ORDER_LOCK_FILE="$("$PY" - "$PROJECT_ROOT" <<'PYCODE'
+import sys
+sys.path.insert(0,sys.argv[1])
+from config.paths import runtime_path
+print(runtime_path("account_order_lock"))
+PYCODE
+)"
+if [[ -f "$ACCOUNT_ORDER_LOCK_FILE" ]]; then
+  account_lock_status="$("$PY" - "$ACCOUNT_ORDER_LOCK_FILE" <<'PYCODE'
+import json,sys
+try:
+    data=json.load(open(sys.argv[1],encoding="utf-8"))
+    if not isinstance(data,dict) or not isinstance(data.get("locked"),bool):
+        raise ValueError("invalid lock marker structure")
+    print("LOCKED" if data["locked"] else "UNLOCKED")
+except Exception as exc:
+    print("INVALID:" + type(exc).__name__)
+PYCODE
+)"
+  case "$account_lock_status" in
+    LOCKED)
+      if should_log_periodic; then log "WATCHDOG_OUTCOME status=degraded reason=account_order_lock file=$ACCOUNT_ORDER_LOCK_FILE action=no_auto_restart"; fi
+      exit 0
+      ;;
+    INVALID*)
+      log "WATCHDOG_OUTCOME status=failed reason=account_order_lock_marker_invalid file=$ACCOUNT_ORDER_LOCK_FILE detail=$account_lock_status fail_closed=1"
+      exit 1
+      ;;
+  esac
+fi
 PID1_COMM="$(ps -p 1 -o comm= 2>/dev/null | tr -d ' ' || true)"
 if [[ "$PID1_COMM" == "systemd" ]] && command -v systemctl >/dev/null 2>&1; then
   if [[ "$EUID" -eq 0 ]]; then SYSTEMCTL=(systemctl); elif command -v sudo >/dev/null 2>&1; then SYSTEMCTL=(sudo systemctl); else log "ERROR=systemd_permission_missing"; exit 1; fi
