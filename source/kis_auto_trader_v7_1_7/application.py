@@ -1636,6 +1636,10 @@ def main() -> None:
                         telegram.send(f"미체결 타임아웃 취소 요청\n종목={symbol_label(pending.symbol, (store.get_position(pending.symbol) or {}).get('name', ''))}\n구분={pending.side}\n원주문번호={pending.order_no}\n취소주문번호={cancel_order_no}\n취소상태=최종 확인 대기")
                     except Exception as exc:
                         orders.record_cancel_error(pending, exc)
+                        if orders.account_order_locked:
+                            orders.mark_cancel_attempted(pending.order_no)
+                            log.critical("계좌 전체 주문 잠금으로 추가 취소 POST를 중단하고 REST 대사만 유지합니다: order=%s", pending.order_no)
+                            continue
                         # KIS 40330000은 취소할 잔량이 없다는 뜻입니다.
                         # 같은 취소 요청을 반복하지 않고 다음 REST 미체결/잔고 조회로
                         # 실제 상태(전량 체결/이미 취소/기타 종료)를 확인합니다.
