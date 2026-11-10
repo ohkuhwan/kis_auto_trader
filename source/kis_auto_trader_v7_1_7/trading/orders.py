@@ -299,6 +299,8 @@ class OrderManager:
 
     def request_cancel(self, pending: PendingOrder) -> dict:
         """원주문 취소를 요청하고, 응답 주문번호와 원문 응답의 핵심 필드를 기록합니다."""
+        if self.account_order_locked:
+            raise AccountOrderLockedError(self.account_order_lock)
         response = self.api.cancel_order(pending.order_no, pending.branch_no)
         output = self._cancel_response_output(response)
         cancel_order_no = str(_first(output, "ODNO", "odno", "CANCEL_ODNO", "cancel_odno", default="")).strip()
