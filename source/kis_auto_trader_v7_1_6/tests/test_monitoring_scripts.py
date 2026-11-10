@@ -12,6 +12,13 @@ def _install_stdlib_python(fakebin: Path):
     wrapper.chmod(0o755)
 
 
+def _install_fake_sudo(fakebin: Path):
+    """Keep systemd integration tests isolated from the runner's real sudo."""
+    wrapper = fakebin / "sudo"
+    wrapper.write_text('#!/usr/bin/env bash\nexec "$@"\n', encoding="utf-8")
+    wrapper.chmod(0o755)
+
+
 def test_monitoring_entrypoints_exist_and_are_executable():
     for rel in (
         "scripts/start_monitoring.sh",
@@ -141,6 +148,7 @@ def _watchdog_project(tmp_path, date_value, time_value, weekday):
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
     _install_stdlib_python(fakebin)
+    _install_fake_sudo(fakebin)
     (fakebin / "date").write_text(
         "#!/usr/bin/env bash\ncase \"$*\" in\n"
         f"  *%H:%M*) echo {time_value} ;;\n"
@@ -805,6 +813,7 @@ def test_active_systemd_service_resumes_timers_without_overwriting_live_units(tm
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
     _install_stdlib_python(fakebin)
+    _install_fake_sudo(fakebin)
     (fakebin / "ps").write_text("#!/usr/bin/env bash\necho systemd\n", encoding="utf-8")
     (fakebin / "ps").chmod(0o755)
     (fakebin / "pgrep").write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
