@@ -177,3 +177,13 @@ def test_operator_unlock_script_requires_confirmation_and_preserves_audit(tmp_pa
     assert data["msg_cd"] == "40910000"
     assert data["manual_release_confirmed"] is True
     assert "new mock account" in data["release_reason"]
+
+
+def test_watchdog_reports_degraded_lock_and_supports_read_only_restart():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "monitoring" / "watchdog.sh").read_text(encoding="utf-8")
+    assert 'status=degraded reason=account_order_lock' in script
+    assert 'mode=read_only_reconcile' in script
+    assert 'action=no_auto_restart' not in script
