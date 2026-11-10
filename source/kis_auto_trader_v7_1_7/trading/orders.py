@@ -240,7 +240,9 @@ class OrderManager:
                 return False
             self.account_order_lock["alert_sent"] = True
             self.account_order_lock["alert_sent_at_epoch"] = time.time()
-            self._save_account_order_lock()
+            # 손상/접근 불가 파일의 원본은 보존하고, 정상적으로 로드된 마커만 갱신합니다.
+            if not self.account_order_lock_integrity_error:
+                self._save_account_order_lock()
             return True
 
     def _load_cancel_records(self) -> None:
