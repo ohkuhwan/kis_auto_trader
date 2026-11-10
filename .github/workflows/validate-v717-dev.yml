@@ -64,7 +64,8 @@ jobs:
 
       - name: Build release ZIP
         run: |
-          find . -type d \\( -name "__pycache__" -o -name ".pytest_cache" \\) -prune -exec rm -rf {} +
+          find . -type d -name "__pycache__" -prune -exec rm -rf {} +
+          find . -type d -name ".pytest_cache" -prune -exec rm -rf {} +
           zip -qr "$RUNNER_TEMP/kis_auto_trader_v7_1_7.zip" . -x ".env" ".venv/*" "**/.venv/*" "**/__pycache__/*" "**/.pytest_cache/*" "logs/*" "json/*" "*.pyc"
           unzip -t "$RUNNER_TEMP/kis_auto_trader_v7_1_7.zip"
           sha256sum "$RUNNER_TEMP/kis_auto_trader_v7_1_7.zip"
