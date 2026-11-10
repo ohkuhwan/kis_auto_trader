@@ -5,7 +5,7 @@ on:
     branches:
       - archive-unpack-test
     paths:
-      - ".validate-trigger"
+      - "**"
 
 permissions:
   contents: read
