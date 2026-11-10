@@ -1001,8 +1001,8 @@ def main() -> None:
         log.critical("상태 파일 복구 필요로 자동매매 시작 중단: %s", exc)
         raise SystemExit(2) from exc
     engine = StrategyEngine(settings)
-    # 매수는 지정가 체결 대기 여유를 주기 위해 기본 120초, 매도는 기본 60초입니다.
-    # 기존 ORDER_TIMEOUT_SEC는 새 BUY/SELL 값이 없을 때의 하위 호환 기준값입니다.
+    # BUY/SELL 주문 타임아웃은 settings에서 최소 300초 하한을 적용합니다.
+    # 기존 ORDER_TIMEOUT_SEC는 side별 설정이 없을 때의 하위 호환 기준값입니다.
     orders = OrderManager(
         api,
         settings.order_timeout_sec,
