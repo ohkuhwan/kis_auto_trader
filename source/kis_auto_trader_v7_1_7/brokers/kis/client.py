@@ -383,7 +383,10 @@ class KisApi:
                 response_summary = {}
             response_msg_cd = str(response_summary.get("msg_cd", response_summary.get("error_code", "")) or "").strip()
             response_rt_cd = str(response_summary.get("rt_cd", "") or "").strip()
-            if response.status_code >= 400 or response_rt_cd not in {"", "0"}:
+            if path.endswith("/psearch-result") and response_msg_cd.upper() == "MCA05918":
+                log.info("KIS_REST_RESPONSE_EMPTY method=%s path=%s tr_id=%s http_status=%s msg_cd=MCA05918 elapsed_ms=%.1f",
+                         method, path, tr_id, response.status_code, elapsed_ms)
+            elif response.status_code >= 400 or response_rt_cd not in {"", "0"}:
                 log.warning("KIS_REST_RESPONSE_ERROR method=%s path=%s tr_id=%s attempt=%d http_status=%s rt_cd=%s msg_cd=%s elapsed_ms=%.1f msg=%s",
                             method, path, tr_id, attempt + 1, response.status_code, response_rt_cd,
                             response_msg_cd, elapsed_ms, _redact_sensitive_text(response_summary.get("msg1", response_summary.get("error_description", response.text[:240])))[:240])
@@ -636,14 +639,21 @@ class KisApi:
         """조건명과 정확히 일치하는 seq를 반환합니다."""
         wanted = condition_name.strip()
         rows = self.condition_titles()
+        available = [
+            {"condition_nm": str(row.get("condition_nm", "")).strip(),
+             "seq": str(row.get("seq", "")).strip()}
+            for row in rows if str(row.get("condition_nm", "")).strip()
+        ]
         for row in rows:
             name = str(row.get("condition_nm", "")).strip()
             if name == wanted:
                 seq = str(row.get("seq", "")).strip()
                 if not seq:
+                    log.error("HTS 조건명은 있으나 seq 필드가 비어 있습니다: condition=%r available=%s", wanted, available)
                     raise KisApiError(f"조건은 찾았지만 seq가 없습니다: {wanted}")
+                log.info("HTS_CONDITION_MATCH condition=%r seq=%s available=%s", wanted, seq, available)
                 return seq
-        available = [str(r.get("condition_nm", "")).strip() for r in rows if r.get("condition_nm")]
+        log.error("HTS_CONDITION_NOT_FOUND requested=%r available=%s", wanted, available)
         raise KisApiError(f"HTS 조건을 찾지 못했습니다: {wanted}; 현재 조건={available}")
 
     def current_price(self, symbol: str) -> dict:
