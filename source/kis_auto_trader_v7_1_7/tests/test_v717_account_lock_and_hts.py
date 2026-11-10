@@ -116,3 +116,64 @@ def test_token_cache_fingerprint_changes_when_mock_account_changes(tmp_path, mon
     monkeypatch.setenv("KIS_CANO", "50000002")
     second = KisApi(load_settings())
     assert first._credential_fingerprint != second._credential_fingerprint
+
+
+def test_cancel_post_is_blocked_after_account_lock(tmp_path, monkeypatch):
+    from trading.orders import AccountOrderLockedError, OrderManager, PendingOrder
+
+    monkeypatch.setenv("KIS_DATA_DIR", str(tmp_path))
+
+    class Api:
+        def __init__(self):
+            self.cancel_calls = 0
+        def cancel_order(self, *args):
+            self.cancel_calls += 1
+            return {}
+
+    api = Api()
+    manager = OrderManager(api, timeout_sec=60)
+    manager.latch_account_order_lock_from_error(
+        msg_cd="IGW00002", msg1="account mismatch", method="POST", path="/order"
+    )
+    pending = PendingOrder(
+        order_no="12345", branch_no="00001", symbol="005930",
+        side="SELL", qty=1, filled_qty=0,
+    )
+    with pytest.raises(AccountOrderLockedError):
+        manager.request_cancel(pending)
+    assert api.cancel_calls == 0
+
+
+def test_operator_unlock_script_requires_confirmation_and_preserves_audit(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    lock_path = tmp_path / "account_order_lock.json"
+    lock_path.write_text(json.dumps({
+        "schema_version": 1, "locked": True, "msg_cd": "40910000",
+        "msg1": "expired mock account", "alert_sent": True,
+    }), encoding="utf-8")
+    env = os.environ.copy()
+    env["KIS_DATA_DIR"] = str(tmp_path)
+    script = Path(__file__).resolve().parents[1] / "scripts" / "unlock_account_order_lock.py"
+
+    missing_confirmation = subprocess.run(
+        [sys.executable, str(script), "--reason", "verified account and API registration"],
+        env=env, capture_output=True, text=True,
+    )
+    assert missing_confirmation.returncode != 0
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["locked"] is True
+
+    released = subprocess.run(
+        [sys.executable, str(script), "--confirm-account-verified",
+         "--reason", "new mock account API and REST WebSocket verified"],
+        env=env, capture_output=True, text=True,
+    )
+    assert released.returncode == 0, released.stderr
+    data = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert data["locked"] is False
+    assert data["msg_cd"] == "40910000"
+    assert data["manual_release_confirmed"] is True
+    assert "new mock account" in data["release_reason"]
