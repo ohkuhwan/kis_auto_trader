@@ -25,6 +25,20 @@ from config.paths import runtime_path
 order_log = logging.getLogger("trading.order")
 
 
+_ACCOUNT_ORDER_ERROR_CODES = {"40910000", "IGW00002", "90070000"}
+
+
+class AccountOrderLockedError(RuntimeError):
+    """계좌/인증 오류로 BUY·SELL 신규 주문이 잠긴 상태를 나타냅니다."""
+    account_order_locked = True
+
+    def __init__(self, lock: dict | None = None):
+        self.lock = dict(lock or {})
+        self.msg_cd = str(self.lock.get("msg_cd", "") or "")
+        self.reason = str(self.lock.get("msg1", self.lock.get("reason", "")) or "")
+        super().__init__(f"계좌 전체 주문 잠금 상태: msg_cd={self.msg_cd or 'UNKNOWN'}; {self.reason}")
+
+
 def _int(value, default: int = 0) -> int:
     """KIS 문자열 숫자를 안전하게 int로 변환합니다."""
     try:
@@ -120,6 +134,9 @@ class OrderManager:
         self.integrity_error: str | None = None
         self.last_balance_reconcile_ts = 0.0
         self.lock = threading.RLock()
+        self.account_order_lock_file = runtime_path("account_order_lock")
+        self.account_order_lock: dict = {}
+        self.account_order_lock_integrity_error: str | None = None
         # WebSocket 체결통보가 REST 주문 응답/로컬 pending 등록보다 먼저 도착하는
         # 짧은 경합 구간을 흡수합니다. 보류 통보는 주문번호가 확인된 뒤 재처리합니다.
         try:
@@ -131,6 +148,100 @@ class OrderManager:
         self.deferred_fill_events: list[FillEvent] = []
         self._load_uncertain_orders()
         self._load_cancel_records()
+        self._load_account_order_lock()
+        # 모든 REST 경로에서 계좌/인증 오류를 감지해 계좌 잠금으로 전파합니다.
+        try:
+            self.api.account_error_handler = self.latch_account_order_lock_from_error
+        except Exception:
+            order_log.warning("KIS API account_error_handler 등록을 건너뜀; 주문 POST 오류에서 직접 판별합니다.")
+
+    @property
+    def account_order_locked(self) -> bool:
+        """잠금 마커가 활성화됐거나 마커 무결성을 확인할 수 없으면 True입니다."""
+        return bool(self.account_order_lock.get("locked")) or bool(self.account_order_lock_integrity_error)
+
+    def _load_account_order_lock(self) -> None:
+        """계좌 주문 잠금을 복구합니다. 손상된 파일은 잠금으로 간주하고 원본을 보존합니다."""
+        try:
+            raw_text = self.account_order_lock_file.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            self.account_order_lock_integrity_error = f"{type(exc).__name__}: {exc}"
+            self.account_order_lock = {"locked": True, "msg_cd": "LOCK_FILE_UNREADABLE",
+                                       "reason": self.account_order_lock_integrity_error,
+                                       "requires_manual_release": True}
+            order_log.critical("계좌 주문 잠금 파일을 읽을 수 없어 fail-closed: %s", self.account_order_lock_file)
+            return
+        try:
+            raw = json.loads(raw_text)
+            if not isinstance(raw, dict) or not isinstance(raw.get("locked"), bool):
+                raise ValueError("잠금 파일은 locked boolean 필드를 포함한 JSON 객체여야 합니다")
+            self.account_order_lock = dict(raw)
+            if raw["locked"]:
+                order_log.critical("이전 실행의 계좌 전체 주문 잠금 복구: msg_cd=%s reason=%s file=%s",
+                                   raw.get("msg_cd", "UNKNOWN"), raw.get("msg1", raw.get("reason", "")),
+                                   self.account_order_lock_file)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            self.account_order_lock_integrity_error = f"{type(exc).__name__}: {exc}"
+            self.account_order_lock = {"locked": True, "msg_cd": "LOCK_FILE_INVALID",
+                                       "reason": self.account_order_lock_integrity_error,
+                                       "requires_manual_release": True}
+            order_log.critical("계좌 주문 잠금 파일 손상/형식 오류; fail-closed, 원본 보존: %s",
+                               self.account_order_lock_file)
+
+    def _save_account_order_lock(self) -> None:
+        """잠금 상태를 원자 저장하고 소유자 전용 권한을 적용합니다."""
+        try:
+            path = self.account_order_lock_file
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(json.dumps(self.account_order_lock, ensure_ascii=False, indent=2), encoding="utf-8")
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+            tmp.replace(path)
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+        except OSError as exc:
+            self.account_order_lock_integrity_error = f"잠금 파일 저장 실패: {type(exc).__name__}: {exc}"
+            order_log.critical("%s; 메모리상 잠금은 유지하지만 재시작 전 파일 쓰기 권한을 복구해야 합니다.",
+                               self.account_order_lock_integrity_error)
+
+    def latch_account_order_lock_from_error(self, *, msg_cd: str, msg1: str = "",
+                                            method: str = "", path: str = "",
+                                            side: str = "", symbol: str = "") -> bool:
+        """계좌 단위 KIS 오류를 영구 잠금으로 기록합니다. 최초 1회만 새 잠금으로 처리합니다."""
+        code = str(msg_cd or "").strip().upper()
+        if code not in _ACCOUNT_ORDER_ERROR_CODES:
+            return False
+        with self.lock:
+            if self.account_order_locked:
+                return False
+            self.account_order_lock = {
+                "schema_version": 1, "locked": True, "msg_cd": code,
+                "msg1": str(msg1 or "")[:500], "method": str(method or ""),
+                "path": str(path or ""), "side": str(side or ""),
+                "symbol": str(symbol or ""), "locked_at_epoch": time.time(),
+                "requires_manual_release": True, "alert_sent": False,
+            }
+            self._save_account_order_lock()
+        order_log.critical("계좌 전체 주문 잠금 발동: msg_cd=%s method=%s path=%s side=%s symbol=%s; BUY/SELL 신규 주문 차단, 재시작 후에도 유지",
+                           code, method or "UNKNOWN", path or "UNKNOWN", side or "UNKNOWN", symbol or "UNKNOWN")
+        return True
+
+    def mark_account_order_lock_alerted(self) -> bool:
+        """활성 잠금의 운영자 알림을 최초 1회만 허용합니다."""
+        with self.lock:
+            if not self.account_order_locked or self.account_order_lock.get("alert_sent"):
+                return False
+            self.account_order_lock["alert_sent"] = True
+            self.account_order_lock["alert_sent_at_epoch"] = time.time()
+            self._save_account_order_lock()
+            return True
 
     def _load_cancel_records(self) -> None:
         """취소 감사 기록을 복구합니다. 손상된 파일은 빈 기록으로 덮어쓰지 않습니다."""
@@ -651,6 +762,8 @@ class OrderManager:
             raise ValueError("side must be BUY or SELL")
         if qty <= 0:
             raise ValueError("qty must be positive")
+        if self.account_order_locked:
+            raise AccountOrderLockedError(self.account_order_lock)
         if stop_event is not None and stop_event.is_set():
             order_log.warning("종료 신호로 신규 주문 POST 차단: symbol=%s side=%s qty=%d", symbol_label(symbol), side, qty)
             raise RuntimeError("종료 신호 수신으로 신규 주문 제출 차단")
@@ -670,8 +783,16 @@ class OrderManager:
             order_log.critical("주문 결과 불명확: symbol=%s side=%s qty=%d; 해당 종목만 대사 대상으로 기록, POST 재전송 금지", symbol_label(symbol), side, qty)
             raise
         except KisApiError as exc:
-            # 명시적인 KIS 업무오류/거절 응답은 접수 불명확과 구분해 기록합니다.
-            # AmbiguousOrderError는 앞에서 처리되었으므로 여기서는 명시적 오류만 남깁니다.
+            # 계좌/인증 오류는 종목 단위가 아니므로 모든 BUY·SELL 신규 주문을 잠급니다.
+            code = str(getattr(exc, "msg_cd", "") or "").strip().upper()
+            if code in _ACCOUNT_ORDER_ERROR_CODES:
+                self.latch_account_order_lock_from_error(
+                    msg_cd=code, msg1=getattr(exc, "msg1", str(exc)),
+                    method="POST", path="/uapi/domestic-stock/v1/trading/order-cash",
+                    side=side, symbol=symbol,
+                )
+                raise AccountOrderLockedError(self.account_order_lock) from exc
+            # 명시적인 일반 종목 업무오류는 기존처럼 상위 호출부로 전달합니다.
             order_log.error("KIS 주문 API 오류(명시 응답): symbol=%s side=%s qty=%d error=%s", symbol_label(symbol), side, qty, exc)
             raise
         except Exception as exc:
