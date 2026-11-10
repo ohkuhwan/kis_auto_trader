@@ -119,6 +119,7 @@ class KisApi:
         self.s = settings
         # OrderManager가 등록하는 callback으로, 계좌/인증 단위 오류를 주문 잠금에 전달합니다.
         self.account_error_handler = None
+        self.account_order_locked_checker = None
         self.session = requests.Session()
         self.token = ""
         self.token_expire_at = 0.0
@@ -357,6 +358,11 @@ class KisApi:
                 log.warning("KIS_RATE_LIMIT_WAIT method=%s path=%s tr_id=%s attempt=%d waited_sec=%.2f recent_1s=%d recent_60s=%d minute_limit=%d cooldown_remaining_sec=%.2f",
                             method, path, tr_id, attempt + 1, limiter_wait, stats["recent_1s"],
                             stats["recent_60s"], stats["configured_min_limit"], stats["cooldown_remaining_sec"])
+            # limiter 대기 중 다른 worker가 계좌 잠금을 발동했을 수 있으므로 POST 직전에 재확인합니다.
+            if method == "POST" and path.endswith("/trading/order-cash"):
+                checker = getattr(self, "account_order_locked_checker", None)
+                if callable(checker) and checker():
+                    raise KisApiError("계좌 전체 주문 잠금 상태: 신규 BUY/SELL POST 차단")
             try:
                 response = self.session.request(method, url, headers=headers, params=params, json=body, timeout=10)
             except requests.RequestException as exc:
