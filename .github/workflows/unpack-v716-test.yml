@@ -1,0 +1,82 @@
+name: Unpack V7.1.6 archive (test branch only)
+
+on:
+  push:
+    branches:
+      - archive-unpack-test
+    paths:
+      - ".unpack-trigger"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unpack-v716-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  unpack:
+    if: github.ref == 'refs/heads/archive-unpack-test'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+        with:
+          ref: archive-unpack-test
+
+      - name: Inspect and safely extract archive
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, zipfile
+          archive = pathlib.Path("kis_auto_trader_v7_1_6.zip")
+          if not archive.is_file():
+              raise SystemExit("ERROR: kis_auto_trader_v7_1_6.zip not found")
+          dest = pathlib.Path("source/kis_auto_trader_v7_1_6")
+          dest.mkdir(parents=True, exist_ok=True)
+          manifest = []
+          skipped = []
+          forbidden_names = {".env", ".env.local", ".env.production"}
+          forbidden_fragments = ("kis_tokens", "access_token", "approval_key", "app_secret", "private_key")
+          with zipfile.ZipFile(archive) as zf:
+              for info in zf.infolist():
+                  raw = info.filename
+                  p = pathlib.PurePosixPath(raw)
+                  if p.is_absolute() or ".." in p.parts or "\\\\" in raw:
+                      raise SystemExit(f"Unsafe archive path: {raw!r}")
+                  if info.is_dir():
+                      continue
+                  parts = [x.lower() for x in p.parts]
+                  base = parts[-1]
+                  if base in forbidden_names or any(x in raw.lower() for x in forbidden_fragments):
+                      raise SystemExit(f"Potential secret file found; refusing to commit: {raw}")
+                  if any(x in ("logs", "json", "__pycache__", ".pytest_cache") for x in parts):
+                      skipped.append(raw)
+                      continue
+                  data = zf.read(info)
+                  target = dest.joinpath(*p.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(data)
+                  manifest.append({
+                      "path": str(target.relative_to(dest)),
+                      "size": len(data),
+                      "sha256": hashlib.sha256(data).hexdigest()
+                  })
+          if not manifest:
+              raise SystemExit("No project files extracted")
+          pathlib.Path("source/V7.1.6-EXTRACTION-MANIFEST.json").write_text(
+              json.dumps({"archive": archive.name, "files": manifest, "skipped_operational_paths": skipped},
+                         ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+          print(f"Extracted files: {len(manifest)}")
+          print(f"Skipped operational files: {len(skipped)}")
+          print(f"Manifest SHA256: {hashlib.sha256(pathlib.Path('source/V7.1.6-EXTRACTION-MANIFEST.json').read_bytes()).hexdigest()}")
+          PY
+
+      - name: Commit extracted source to test branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/
+          git commit -m "Test: extract V7.1.6 archive into source tree"
+          git push origin HEAD:archive-unpack-test
