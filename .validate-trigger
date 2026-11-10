@@ -1,1 +1,1 @@
-Run SHA-256 integrity verification and pytest against extracted V7.1.6 source.
+Run SHA-256 integrity verification and pytest against extracted V7.1.6 source. Retry trigger 2026-11-10.
