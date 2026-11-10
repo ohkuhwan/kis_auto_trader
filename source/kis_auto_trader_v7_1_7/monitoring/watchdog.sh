@@ -146,8 +146,11 @@ PYCODE
   fi
   if [[ "$calendar_rc" -ne 0 ]]; then log "WATCHDOG_OUTCOME status=failed reason=holiday_calendar_invalid date=$TODAY file=$CALENDAR_FILE detail=${calendar_result//$'\n'/; } fail_closed=1"; exit 1; fi
 fi
-# A persistent account/API order lock is a trading-degraded state, not a dead process.
-# Do not restart the trader or report healthy while the operator must verify the KIS account.
+# Account order lock is a trading-degraded state, not a dead process.
+# If the process is down, watchdog may restart it: OrderManager restores the lock and
+# the restarted process continues read-only reconciliation without sending order POSTs.
+ACCOUNT_ORDER_LOCK_ACTIVE=0
+ACCOUNT_ORDER_LOCK_STATUS="UNLOCKED"
 ACCOUNT_ORDER_LOCK_FILE="$("$PY" - "$PROJECT_ROOT" <<'PYCODE'
 import sys
 sys.path.insert(0,sys.argv[1])
@@ -168,25 +171,27 @@ except Exception as exc:
 PYCODE
 )"
   case "$account_lock_status" in
-    LOCKED)
-      if should_log_periodic; then log "WATCHDOG_OUTCOME status=degraded reason=account_order_lock file=$ACCOUNT_ORDER_LOCK_FILE action=no_auto_restart"; fi
-      exit 0
-      ;;
-    INVALID*)
-      log "WATCHDOG_OUTCOME status=failed reason=account_order_lock_marker_invalid file=$ACCOUNT_ORDER_LOCK_FILE detail=$account_lock_status fail_closed=1"
-      exit 1
-      ;;
+    LOCKED) ACCOUNT_ORDER_LOCK_ACTIVE=1; ACCOUNT_ORDER_LOCK_STATUS="LOCKED" ;;
+    INVALID*) ACCOUNT_ORDER_LOCK_ACTIVE=1; ACCOUNT_ORDER_LOCK_STATUS="INVALID" ;;
   esac
 fi
 PID1_COMM="$(ps -p 1 -o comm= 2>/dev/null | tr -d ' ' || true)"
 if [[ "$PID1_COMM" == "systemd" ]] && command -v systemctl >/dev/null 2>&1; then
   if [[ "$EUID" -eq 0 ]]; then SYSTEMCTL=(systemctl); elif command -v sudo >/dev/null 2>&1; then SYSTEMCTL=(sudo systemctl); else log "ERROR=systemd_permission_missing"; exit 1; fi
   if "${SYSTEMCTL[@]}" is-active --quiet kis-auto-trader.service; then
-    if should_log_periodic; then log "WATCHDOG_OUTCOME status=healthy reason=service_active unit=kis-auto-trader.service"; fi
+    if [[ "$ACCOUNT_ORDER_LOCK_ACTIVE" -eq 1 ]]; then
+      if should_log_periodic; then log "WATCHDOG_OUTCOME status=degraded reason=account_order_lock lock_status=$ACCOUNT_ORDER_LOCK_STATUS service=active action=none"; fi
+    elif should_log_periodic; then
+      log "WATCHDOG_OUTCOME status=healthy reason=service_active unit=kis-auto-trader.service"
+    fi
     exit 0
   fi
   if pgrep -f "[p]ython.*$PROJECT_ROOT/main\.py" >/dev/null 2>&1; then log "WATCHDOG_OUTCOME status=deferred reason=orphan_process_present service_inactive=1"; exit 0; fi
-  log "action=start_requested unit=kis-auto-trader.service now=$KST_NOW cutoff=$SHUTDOWN_AT"
+  if [[ "$ACCOUNT_ORDER_LOCK_ACTIVE" -eq 1 ]]; then
+    log "action=start_requested unit=kis-auto-trader.service account_order_lock=$ACCOUNT_ORDER_LOCK_STATUS mode=read_only_reconcile"
+  else
+    log "action=start_requested unit=kis-auto-trader.service now=$KST_NOW cutoff=$SHUTDOWN_AT"
+  fi
   if [[ "$EUID" -eq 0 ]]; then
     START_REQUEST_LOG="$(kis_prepare_shared_log "$LOG_DIR" "start_request_${TODAY}.log")" || { log "WATCHDOG_OUTCOME status=start_request_failed reason=start_request_log_unavailable"; exit 1; }
     if "$PROJECT_ROOT/scripts/request_start.sh" --trigger "$TRIGGER" >> "$START_REQUEST_LOG" 2>&1; then rc=0; else rc=$?; fi
@@ -343,10 +348,18 @@ PYCODE
   fi
 fi
 if pgrep -f "[p]ython[^ ]* -u $PROJECT_ROOT/main\.py" >/dev/null 2>&1 || pgrep -f "[p]ython.*$PROJECT_ROOT/main\.py" >/dev/null 2>&1; then
-  if should_log_periodic; then log "WATCHDOG_OUTCOME status=healthy reason=trader_process_present executor=proot"; fi
+  if [[ "$ACCOUNT_ORDER_LOCK_ACTIVE" -eq 1 ]]; then
+    if should_log_periodic; then log "WATCHDOG_OUTCOME status=degraded reason=account_order_lock lock_status=$ACCOUNT_ORDER_LOCK_STATUS executor=proot process=active action=none"; fi
+  elif should_log_periodic; then
+    log "WATCHDOG_OUTCOME status=healthy reason=trader_process_present executor=proot"
+  fi
   exit 0
 fi
-log "action=start_requested executor=proot now=$KST_NOW cutoff=$SHUTDOWN_AT"
+if [[ "$ACCOUNT_ORDER_LOCK_ACTIVE" -eq 1 ]]; then
+  log "action=start_requested executor=proot account_order_lock=$ACCOUNT_ORDER_LOCK_STATUS mode=read_only_reconcile"
+else
+  log "action=start_requested executor=proot now=$KST_NOW cutoff=$SHUTDOWN_AT"
+fi
 KIS_START_LOCK_HELD=1 nohup "$PROJECT_ROOT/scripts/start.sh" --trigger "$TRIGGER" >> "$LOG_DIR/startup_${TODAY}.log" 2>&1 </dev/null &
 pid=$!
 sleep 1
