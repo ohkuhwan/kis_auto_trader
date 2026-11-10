@@ -40,6 +40,7 @@ def runtime_paths() -> dict[str, Path]:
         "token_cache": _env_path("KIS_TOKEN_CACHE_FILE", data_dir / "kis_tokens.json"),
         "config_snapshot": data_dir / "config_snapshot.json",
         "uncertain_orders": _env_path("UNCERTAIN_ORDERS_FILE", data_dir / "uncertain_orders.json"),
+        "account_order_lock": _env_path("ACCOUNT_ORDER_LOCK_FILE", data_dir / "account_order_lock.json"),
         "cancel_orders": _env_path("CANCEL_ORDERS_FILE", data_dir / "cancel_orders.json"),
         "holiday_cache": _env_path("HOLIDAY_CACHE_FILE", data_dir / "holiday_config.json"),
         "strategy_signal_log": _env_path("STRATEGY_SIGNAL_LOG", log_dir / "strategy_signals.jsonl"),
