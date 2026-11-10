@@ -1,0 +1,107 @@
+flowchart TB
+  %% KIS Auto Trader V7.0.0 detailed implementation flow; source-level labels
+  subgraph BOOT["1. 시작 · 설정 · 복구"]
+    A["scripts/start.sh / systemd service"] --> B["main.py → application.main()"]
+    B --> C["config.settings.load_settings()\n.env 로드 · PAPER/TRADING 분리"]
+    C --> D["config.paths.runtime_paths()\n프로젝트 루트 기준 파일 경로"]
+    D --> E["StateStore · 토큰/주문/취소 파일 경로 준비"]
+    E --> F["storage.state.StateStore\n기존 상태 로드 · 손상 상태는 오류로 처리"]
+    F --> G["storage.holiday.HolidayChecker\n거래일/휴장일 판정"]
+    G -->|휴장 또는 판정 실패| STOP["신규 시작/매매 차단\n사유 로그 · 알림"]
+    G -->|거래일| H["KisApi 초기화\n토큰 캐시 · rate limiter · REST"]
+    H --> I["KisRealtime 초기화\nWebSocket 체결/시세 구독"]
+    I --> J["시작 잔고·미체결·주문내역 대사"]
+  end
+
+  subgraph CYCLE["2. 주기 루프 · 신규 후보 수집"]
+    J --> K["application.run_cycle()\n거래시간 · 종료시각 · 일일 위험 게이트"]
+    K --> L{"ENTRY_MODE"}
+    L -->|HTS 또는 ALL| M["KisApi.condition_result()\nHTS 저장 조건검색"]
+    L -->|BUILDER 또는 ALL| N["BUILDER_SYMBOLS_FILE\nconfig/entry_symbols.txt 목록"]
+    M --> O["HTS 후보 정규화\n중복/잘못된 코드 제거"]
+    N --> P["strategies.builder_engine.official_adapter\nstrategy_profiles.yaml + 전략 YAML 10개"]
+    P --> Q["KIS 일봉 조회\ninquire-daily-itemchartprice"]
+    Q --> R["전략별 지표/신호 계산\nBUY · HOLD · SELL · ERROR"]
+    R --> S["프로필 투표 집계\nmin score · min votes · primary"]
+    O --> T["공통 후보 정렬/중복 제거"]
+    S --> T
+    T --> U["시세 최신성 · 급등 추격 · 거래대금/가격\n제외 규칙 및 후보 점수"]
+    U --> V["최종 매수 후보 1개 선택"]
+  end
+
+  subgraph BUY["3. 매수 안전 게이트 · 주문 접수"]
+    V --> W["trading.buy_process.BuyProcess\n매수 가능 시간 · 거래 횟수 · 손실 한도"]
+    W --> X["기존 보유/쿨다운/동일 종목 예약 확인"]
+    X --> Y["현금·주문가능금액·예약 현금 확인"]
+    Y --> Z["risk/position_sizer.py\n주문 수량/최소 금액 계산"]
+    Z --> AA{"KIS_ENABLE_TRADING=true?"}
+    AA -->|아니오| DRY["DRY-RUN 기록\n주문 POST 금지"]
+    AA -->|예| AB["SubmissionGuard\n종목별 중복 제출 방지"]
+    AB --> AC["OrderManager.submit()\nKisApi.order_cash()"]
+    AC --> AD{"주문 응답 확정?"}
+    AD -->|아니오/타임아웃| AE["uncertain_orders.json\n종목 잠금 · 자동 재전송 금지"]
+    AD -->|예| AF["pendingOrder 등록\n주문번호/수량/가격/시간"]
+  end
+
+  subgraph SELL["4. 보유 감시 · 청산"]
+    J --> AG["보유 종목 목록/체결 상태 갱신"]
+    I --> AH["실시간 시세 · 체결 통보"]
+    AG --> AI["trading.sell_process.SellProcess\n전략 신호 + 손절/익절/트레일링"]
+    AH --> AI
+    AI --> AJ["가격 최신성 · 잔고/매도가능수량 확인"]
+    AJ --> AK["SubmissionGuard · OrderManager.submit()"]
+    AK --> AL{"매도 응답 확정?"}
+    AL -->|아니오| AE
+    AL -->|예| AF
+  end
+
+  subgraph FILL["5. 체결 처리 · 주기 대사"]
+    AF --> AM["trading.fill_handler.FillHandler\n체결 키/누적 수량 중복 방지"]
+    AH --> AM
+    AM --> AN["포지션·평균단가·잔여수량 갱신"]
+    AN --> AO["storage.state.StateStore 저장\n일일 매수 횟수/손익/쿨다운"]
+    AM --> AP["REST 체결/미체결/잔고 대사"]
+    AE --> AP
+    AP --> AQ["trading.reconcile.reconcile()\n로컬 주문과 브로커 상태 비교"]
+    AQ --> AR{"상태 일치?"}
+    AR -->|아니오| AS["보수적 잠금 유지\n재조회/운영자 확인"]
+    AR -->|예| AO
+    AS --> AT["Telegram 운영 알림\n불명확 주문은 삭제/재전송 금지"]
+  end
+
+  subgraph RISK["6. 주기·속도·종료 보호"]
+    K --> BA["SCAN_INTERVAL_SEC 주기"]
+    K --> BB["BALANCE_INTERVAL_SEC 잔고 조회"]
+    K --> BC["ORDER_RECONCILE_INTERVAL_SEC 주문 대사"]
+    H --> BD["초당/분당 호출 상한 · 재시도 지연"]
+    I --> BE["시세 오래됨/연결 끊김 감지"]
+    BE -->|문제| BF["REST fallback 간격 제한\n시세 불충분 시 신규 주문 보류"]
+    K --> BG{"AUTO_SHUTDOWN_TIME 도달?"}
+    BG -->|아니오| K
+    BG -->|예| BH["신규 매수 차단\n미체결 취소 요청 및 상태 확인"]
+    BH --> BI["최종 대사 · 상태 저장 · 로그/알림"]
+  end
+
+  subgraph WATCH["7. 별도 감시 프로세스"]
+    W1["systemd timer / Proot 예약 루프"] --> W2["monitoring/watchdog.sh"]
+    W2 --> W3["거래시간 · 휴장일 · 프로세스 · 잠금 확인"]
+    W3 -->|정지 표식/비거래일/금지시간| W4["자동 시작하지 않음\n사유 기록"]
+    W3 -->|정책상 시작 가능| W5["scripts/request_start.sh\n서비스 시작 요청"]
+    W6["scripts/stop.sh"] --> W7["수동 정지 표식 기록"]
+    W7 --> W2
+  end
+
+  subgraph FILES["8. 운영 데이터와 진단 파일"]
+    F -.-> FILE1["STATE_FILE / json/state.json"]
+    H -.-> FILE2["KIS_TOKEN_CACHE_FILE"]
+    AE -.-> FILE3["UNCERTAIN_ORDERS_FILE"]
+    AC -.-> FILE4["CANCEL_ORDERS_FILE"]
+    G -.-> FILE5["HOLIDAY_CACHE_FILE / KIS_PAPER_HOLIDAY_CALENDAR"]
+    R -.-> FILE6["STRATEGY_SIGNAL_LOG"]
+    AO -.-> FILE7["logs/ 일별 운영/주문/체결 로그"]
+  end
+
+  classDef gate fill:#062744,stroke:#1976a5,color:#e8f5ff;
+  classDef danger fill:#351414,stroke:#b45b5b,color:#fff0f0;
+  class AA,AD,AL,AR,BG gate;
+  class STOP,DRY,AE,AS,AT,BF danger;

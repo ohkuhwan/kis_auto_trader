@@ -1,0 +1,43 @@
+# V7.1.6 사용자 매수 전략 — 기존 YAML 진입 경로에서 읽는 설정입니다.
+# 주의: 공식 KIS Strategy Builder의 모든 DSL을 지원하지 않습니다. 이 프로젝트의
+# strategies/builder_engine/yaml_engine.py가 지원하는 YAML 부분집합만 사용합니다.
+# 실제 거래 조건은 아래 indicators와 해당 방향 조건 그룹에서만 정의합니다.
+# V7.1.6 역할: 이 파일은 매수 지표와 entry 조건만 정의합니다. 청산 조건은 my_exit_strategy.kis.yaml에 둡니다.
+# 지원 indicator type: sma/ma/moving_average/simple_moving_average, ema/exponential_moving_average,
+# rsi, volume_sma/average_volume, pct_change/return_pct. 새 type은 yaml_engine.py에 계산 구현과 테스트가 필요합니다.
+# 기본 가격 alias: close/open/high/low/volume. 사용자 alias는 아래 indicators[].alias에 정의한 이름만 사용합니다.
+# operator: >, >=, <, <=, ==, != 등 yaml_engine.py의 지원 연산자를 확인하세요.
+# weight는 조건 충족 점수에 반영되며 수익 확률을 의미하지 않습니다.
+
+# 파일 스키마 버전 문자열입니다. 현재 어댑터는 이 값을 기준으로 자동 변환하지 않습니다.
+version: "1.0"
+
+# 전략의 식별/설명용 메타데이터입니다. 거래 조건 자체를 바꾸지는 않습니다.
+metadata:
+  name: "V7.1.6 사용자 매수 전략" # 사람이 로그/설정에서 알아보기 위한 전략 이름
+  description: "RSI14가 30을 초과하는 경우" # 전략 의도 설명
+
+# 실제 지표와 매수 진입 조건의 루트입니다. 청산/손익절 설정은 이 파일에 두지 않습니다.
+strategy:
+  id: "custom_entry_example" # 과거 식별자를 유지해 기존 사용자 설정/로그 호환성을 보존합니다.
+
+  # 조건식에서 사용할 지표를 정의합니다. alias는 조건의 left/right에서 참조합니다.
+  indicators:
+    - alias: sma20 # 아래 조건에서 sma20이라는 이름으로 참조합니다.
+      type: sma # 단순이동평균(Simple Moving Average)입니다.
+      params: {period: 20} # 최근 20개 종가의 평균을 계산합니다.
+    - alias: rsi14 # RSI 값을 rsi14라는 alias로 제공합니다.
+      type: rsi # 상대강도지수(Relative Strength Index)입니다.
+      params: {period: 14} # 최근 14개 가격 변화로 계산합니다. 구현은 단순 평균 방식입니다.
+    - alias: volume20 # 평균 거래량을 volume20으로 참조합니다.
+      type: volume_sma # 거래량 단순이동평균입니다.
+      params: {period: 20} # 최근 20개 봉의 거래량 평균입니다.
+
+  # 매수 조건 그룹입니다. action=BUY는 조건 그룹이 참일 때만 나옵니다.
+  entry:
+    logic: AND # 모든 conditions가 참이어야 진입 조건 충족입니다. OR로 바꾸면 의미가 달라집니다.
+    conditions:
+      #- {left: close, operator: ">", right: sma20, weight: 2} # 최신 종가가 20기간 SMA보다 높아야 합니다. 가중치 2는 점수 비중입니다.
+      #- {left: rsi14, operator: ">", right: 45, weight: 1} # 비활성 예시: RSI가 45 초과여야 합니다.
+      - {left: rsi14, operator: ">", right: 30, weight: 1} # RSI가 30 초과여야 합니다. 30은 RSI 값이며 퍼센트 수익률이 아닙니다.
+      #- {left: volume, operator: ">=", right: volume20, weight: 1} # 최신 거래량이 20기간 평균 거래량 이상이어야 합니다.

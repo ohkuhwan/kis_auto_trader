@@ -1,0 +1,8 @@
+# KIS Auto Trader V7.1.6 systemd template. Install via scripts/start_monitoring.sh; do not use /path/to/project literally.
+[Unit]
+Description=KIS Auto Trader watchdog check
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/project
+ExecStart=/path/to/project/monitoring/watchdog.sh --trigger watchdog

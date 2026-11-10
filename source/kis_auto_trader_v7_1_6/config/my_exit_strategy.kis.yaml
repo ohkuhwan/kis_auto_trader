@@ -1,0 +1,37 @@
+# V7.1.6 사용자 매도 전략 — 기존 YAML 청산 경로에서 읽는 설정입니다.
+# V7.1.6 역할: 이 파일은 매도 지표와 exit 조건만 정의합니다. 매수 조건은 my_entry_strategy.kis.yaml에 둡니다.
+# 지원 indicator type: sma/ma/moving_average/simple_moving_average, ema/exponential_moving_average,
+# rsi, volume_sma/average_volume, pct_change/return_pct. 새 type은 yaml_engine.py에 계산 구현과 테스트가 필요합니다.
+# 기본 가격 alias: close/open/high/low/volume. 사용자 alias는 아래 indicators[].alias에 정의한 이름만 사용합니다.
+# 이 파일의 exit 조건은 1차 손익절 퍼센트와 함께 판정합니다. 2차 강제 손익절은 공통 EXIT_*_HARD_PCT가 담당합니다.
+# 주의: 공식 KIS Strategy Builder의 모든 DSL을 지원하지 않습니다. 이 프로젝트의
+# strategies/builder_engine/yaml_engine.py가 지원하는 YAML 부분집합만 사용합니다.
+# 실제 거래 조건은 아래 indicators와 해당 방향 조건 그룹에서만 정의합니다.
+
+# 파일 스키마 버전 문자열입니다. 현재 어댑터는 이 값을 자동 변환하지 않습니다.
+version: "1.0"
+
+# 전략을 식별하고 사람이 이해하기 위한 메타데이터입니다.
+metadata:
+  name: "V7.1.6 사용자 매도 전략" # 전략 이름이며 거래 조건에 직접 사용되지 않습니다.
+  description: "RSI14가 50 이상이면 SELL 조건 충족" # 전략 의도 설명
+
+strategy:
+  id: "custom_exit_example" # 과거 식별자를 유지해 기존 사용자 설정/로그 호환성을 보존합니다.
+
+  # 조건식에서 참조할 지표를 정의합니다.
+  indicators:
+    - alias: sma20 # 조건에서 sma20이라는 이름으로 사용합니다.
+      type: sma # 단순이동평균(Simple Moving Average)입니다.
+      params: {period: 20} # 최근 20개 종가의 산술 평균입니다.
+    - alias: rsi14 # 조건에서 rsi14로 참조합니다.
+      type: rsi # 상대강도지수(Relative Strength Index)입니다.
+      params: {period: 14} # 최근 14개 가격 변화에 기반합니다. 구현은 단순 평균 방식입니다.
+
+  # 청산 조건 그룹입니다. 조건 그룹이 충족되면 SELL 신호가 됩니다.
+  exit:
+    logic: OR # 두 조건 중 하나라도 참이면 청산 조건 충족입니다.
+    conditions:
+      #- {left: close, operator: "<", right: sma20, weight: 2} # 종가가 SMA20보다 낮으면 추세 약화로 보고 청산합니다. 가중치 2는 점수 계산 비중입니다.
+      #- {left: rsi14, operator: ">=", right: 75, weight: 1} # 비활성 예시: RSI가 75 이상이면 과열 조건입니다.
+      - {left: rsi14, operator: ">=", right: 50, weight: 1} # RSI 50 이상이면 청산 조건을 충족합니다. 50은 RSI 값이며 퍼센트 수익률이 아닙니다.
