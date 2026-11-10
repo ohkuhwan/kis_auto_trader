@@ -152,8 +152,9 @@ class OrderManager:
         # 모든 REST 경로에서 계좌/인증 오류를 감지해 계좌 잠금으로 전파합니다.
         try:
             self.api.account_error_handler = self.latch_account_order_lock_from_error
+            self.api.account_order_locked_checker = lambda: self.account_order_locked
         except Exception:
-            order_log.warning("KIS API account_error_handler 등록을 건너뜀; 주문 POST 오류에서 직접 판별합니다.")
+            order_log.warning("KIS API account lock callback/checker 등록을 건너뜀; OrderManager 제출 게이트는 유지합니다.")
 
     @property
     def account_order_locked(self) -> bool:
@@ -785,6 +786,9 @@ class OrderManager:
             order_log.critical("주문 결과 불명확: symbol=%s side=%s qty=%d; 해당 종목만 대사 대상으로 기록, POST 재전송 금지", symbol_label(symbol), side, qty)
             raise
         except KisApiError as exc:
+            # 다른 worker가 먼저 잠금을 발동한 뒤 limiter 대기 중이던 주문도 POST 전에 차단합니다.
+            if self.account_order_locked:
+                raise AccountOrderLockedError(self.account_order_lock) from exc
             # 계좌/인증 오류는 종목 단위가 아니므로 모든 BUY·SELL 신규 주문을 잠급니다.
             code = str(getattr(exc, "msg_cd", "") or "").strip().upper()
             if code in _ACCOUNT_ORDER_ERROR_CODES:
