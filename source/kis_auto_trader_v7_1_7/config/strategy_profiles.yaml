@@ -1,0 +1,94 @@
+# V7.1.6 통합 전략 설정
+# -----------------------------------------------------------------------------
+# 목적: 한투 10개 전략의 등록 목록과 매수/매도 판정 참여 목록을 한 곳에서 관리합니다.
+# 공격형/안정형 프로필은 제거했습니다. ENTRY_MODE(HTS/BUILDER/ALL)는 종목 후보
+# 출처만 선택하며, STRATEGY_EVALUATION_MODE(KIS10/CUSTOM/ALL)는 후보 평가 엔진을 선택합니다.
+#
+# strategies: 각 전략 YAML 파일의 등록 정보입니다. enabled 같은 전역 중복 스위치는 없습니다.
+# decision.buy.strategies: BUY 투표에 참여할 전략 ID와 가중치입니다.
+# decision.sell.strategies: SELL 투표에 참여할 전략 ID와 가중치입니다.
+# 매수 전용/매도 전용 전략은 해당 방향 목록에만 등록합니다. 양방향 전략은 두 목록에 등록합니다.
+# min_votes: 해당 방향의 BUY/SELL 신호를 내야 하는 최소 참여 전략 수입니다.
+# min_score: 해당 방향 참여 전략 가중치 대비 신호 강도 점수 하한(0~100)입니다. 수익 확률이 아닙니다.
+#
+# 주의: 전략 YAML의 strategy.enabled=false는 해당 파일 자체의 비활성화 용도로만 유지됩니다.
+# 설정을 바꾼 뒤 scripts/reload_config.sh --validate-only 및 pytest를 실행하고 모의투자로 확인하세요.
+# -----------------------------------------------------------------------------
+version: 2
+strategies:
+  - id: golden_cross
+    file: config/strategies/strategy_01_golden_cross.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: momentum
+    file: config/strategies/strategy_02_momentum.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: week52_high
+    file: config/strategies/strategy_03_week52_high.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: consecutive
+    file: config/strategies/strategy_04_consecutive.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: disparity
+    file: config/strategies/strategy_05_disparity.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: breakout_fail
+    file: config/strategies/strategy_06_breakout_fail.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: strong_close
+    file: config/strategies/strategy_07_strong_close.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: volatility
+    file: config/strategies/strategy_08_volatility.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: mean_reversion
+    file: config/strategies/strategy_09_mean_reversion.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+  - id: trend_filter
+    file: config/strategies/strategy_10_trend_filter.kis.yaml
+    params: {}  # 전략 YAML의 기본 매개변수를 사용합니다.
+
+decision:
+  # 매수 승인 기준: KIS10 엔진 내부의 BUY 판정에만 적용합니다.
+  buy:
+    #min_votes: 2       # BUY 신호를 내야 하는 최소 전략 수입니다.
+    #min_score: 50      # BUY 가중 점수 비율 하한(0~100)입니다.
+    min_votes: 1       # BUY 신호를 내야 하는 최소 전략 수입니다.
+    min_score: 20      # BUY 가중 점수 비율 하한(0~100)입니다.
+    strategies:
+      - id: golden_cross
+        weight: 1.2  # BUY 신호 집계 가중치입니다.
+      - id: momentum
+        weight: 1.2  # BUY 신호 집계 가중치입니다.
+      #- id: week52_high
+      #  weight: 1.0  # BUY 신호 집계 가중치입니다.
+      - id: consecutive
+        weight: 1.0  # BUY 신호 집계 가중치입니다.
+      - id: disparity
+        weight: 1.0  # BUY 신호 집계 가중치입니다.
+      - id: strong_close
+        weight: 1.0  # BUY 신호 집계 가중치입니다.
+      #- id: volatility
+      #  weight: 1.0  # BUY 신호 집계 가중치입니다.
+      #- id: mean_reversion
+      #  weight: 1.0  # BUY 신호 집계 가중치입니다.
+      - id: trend_filter
+        weight: 1.2  # BUY 신호 집계 가중치입니다.
+  # 매도 승인 기준: KIS10 엔진 내부의 SELL 판정에만 적용합니다.
+  sell:
+    min_votes: 1       # SELL 신호를 내야 하는 최소 전략 수입니다.
+    min_score: 20      # SELL 가중 점수 비율 하한(0~100)입니다.
+    strategies:
+      - id: golden_cross
+        weight: 1.0  # SELL 신호 집계 가중치입니다.
+      - id: momentum
+        weight: 1.0  # SELL 신호 집계 가중치입니다.
+      - id: consecutive
+        weight: 1.0  # SELL 신호 집계 가중치입니다.
+      - id: disparity
+        weight: 1.0  # SELL 신호 집계 가중치입니다.
+      - id: breakout_fail
+        weight: 1.0  # SELL 신호 집계 가중치입니다.
+      - id: mean_reversion
+        weight: 1.0  # SELL 신호 집계 가중치입니다.
+      - id: trend_filter
+        weight: 1.0  # SELL 신호 집계 가중치입니다.

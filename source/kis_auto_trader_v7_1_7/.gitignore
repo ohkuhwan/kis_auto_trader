@@ -1,0 +1,29 @@
+.env
+state.json
+state.json.tmp
+/json/
+logs/*.log
+config/holiday_config.json
+.venv/
+__pycache__/
+*.py[cod]
+
+# 주문 접수 결과가 불명확한 경우 중복 주문 방지를 위한 운영 잠금
+uncertain_orders.json
+uncertain_orders.json.tmp
+
+# REST access token / WebSocket approval key cache (secret material)
+kis_tokens.json
+kis_tokens.json.*.tmp
+
+# 매수/매도 취소 응답 주문번호 및 최종 대사 결과(운영 감사 기록)
+cancel_orders.json
+cancel_orders.json.tmp
+
+# 전략 시그널/테스트 결과는 런타임 산출물이며 배포 ZIP에 포함하지 않습니다.
+logs/*.jsonl
+logs/*.json
+
+# Private migration backups (runtime/user data, never distribute)
+.migration_backups/
+**/.migration_backups/

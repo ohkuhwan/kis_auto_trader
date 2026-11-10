@@ -1,0 +1,64 @@
+# KIS Auto Trader V7.1.6 전략 설정 파일입니다.
+# 값 변경 시 테스트(tests/kis_strategy_test.sh)를 먼저 실행하고 모의투자로 검증하세요.
+# Boolean 기능을 끄려면 enabled: false 또는 0, 선택형 문자열을 비활성화하려면 ""를 사용합니다.
+# 수치 파라미터 0은 전략별 코드에서 유효 범위 검사 후 처리됩니다. 0이 기본값을 의미하는 항목도 있으니 주의하세요.
+version: '1.0'  # .kis.yaml 포맷 버전. 호환성 검증 전 임의 변경 금지.
+metadata:  # 전략 식별/문서화 메타데이터(시그널 계산에는 직접 영향 없음).
+  name: 골든크로스  # 화면/로그에 표시할 전략명.
+  description: "단기 이동평균이 장기 이동평균을 상향 교차하면 BUY, 하향 교차하면 SELL."  # 전략 목적과 BUY/SELL 판단의 간략한 설명.
+  author: KIS Auto Trader internal engine  # 전략 정의/관리 주체.
+  tags: [trend]  # 검색/분류용 태그.
+strategy:  # 전략 실행 정의.
+  id: golden_cross  # 내부 엔진에서 선택하는 전략 ID. 임의 변경 시 구현과 매핑되어야 함.
+  category: trend  # trend/breakout/mean_reversion/risk/momentum 중 분류.
+  enabled: true  # false 또는 0이면 전략 테스트/실행에서 비활성화합니다.
+  execution_mode: internal_preset  # 내부 프리셋 계산; 별도 Builder 서버/API를 호출하지 않습니다.
+  params:  # 프리셋별 파라미터. 값을 0으로 설정하기 전에 아래 주석의 단위/범위를 확인하세요.
+    #short_period: 5  # 단기 SMA 기간(거래일, 양의 정수). 
+    #long_period: 20  # 장기 SMA 기간(거래일, short_period보다 커야 함). 
+    short_period: 3  # 단기 SMA 기간(거래일, 양의 정수). 
+    long_period: 10  # 장기 SMA 기간(거래일, short_period보다 커야 함). 
+  indicators:  # 기본 프리셋은 strategy.params를 실행 입력으로 사용합니다. 이 목록은 지표 정의 메타데이터/설정 검증용이며, 직접 사용하지 않는 지표는 enabled: false 및 period: 0으로 둡니다.
+    - id: sma  # 지표 유형 식별자.
+      alias: sma_fast  # 조건식에서 참조하는 지표 별칭.
+      enabled: true  # false/0이면 해당 지표 정의를 비활성화합니다.
+      params:  # 지표 파라미터.
+        period: "$short_period"  # 계산 기간(거래일).
+    - id: sma  # 지표 유형 식별자.
+      alias: sma_slow  # 조건식에서 참조하는 지표 별칭.
+      enabled: true  # false/0이면 해당 지표 정의를 비활성화합니다.
+      params:  # 지표 파라미터.
+        period: "$long_period"  # 계산 기간(거래일).
+  entry:  # 진입 조건 그룹. 아래 YAML 조건이 실제 BUY/SELL 판정에 사용됩니다.
+    enabled: true  # false 또는 0이면 이 조건 그룹을 비활성화합니다.
+    #logic: AND  # AND=모두 충족, OR=하나 이상 충족.
+    logic: OR  # AND=모두 충족, OR=하나 이상 충족.
+    conditions:  # indicator/operator/compare_to가 실제 시그널 판단 기준입니다.
+      - indicator: sma_fast  # 왼쪽 지표/가격 필드.
+        operator: cross_above  # 비교 연산자.
+        compare_to: "sma_slow"  # 오른쪽 지표 별칭 또는 임계값.
+  exit:  # 청산 조건 그룹. 아래 YAML 조건이 실제 BUY/SELL 판정에 사용됩니다.
+    enabled: true  # false 또는 0이면 이 조건 그룹을 비활성화합니다.
+    logic: OR  # AND=모두 충족, OR=하나 이상 충족.
+    conditions:  # indicator/operator/compare_to가 실제 시그널 판단 기준입니다.
+      - indicator: sma_fast  # 왼쪽 지표/가격 필드.
+        operator: cross_below  # 비교 연산자.
+        compare_to: "sma_slow"  # 오른쪽 지표 별칭 또는 임계값.
+# 주의(V7.1.2): 아래 risk 값은 전략 파일 호환/설명용입니다. 현재 KIS10 내부 신호 평가 및 공통 청산 실행은 이 값을 포지션 손익절 기준으로 적용하지 않습니다.
+# 아래 enabled/percent를 수정해도 실제 손절·익절·트레일링 주문 기준은 바뀌지 않습니다.
+# 실제 1차/2차 손익절 기준은 .env의 EXIT_STOP_LOSS_FIRST_PCT, EXIT_STOP_LOSS_HARD_PCT,
+# EXIT_TAKE_PROFIT_FIRST_PCT, EXIT_TAKE_PROFIT_HARD_PCT 설정이 관리합니다.
+# 전략별 risk를 실제 적용하려면 별도 실행 로직과 회귀 테스트를 구현한 뒤 릴리스해야 합니다.
+risk:  # 현재는 실행 기준이 아니며, 아래 값은 문서/호환 목적입니다.
+  stop_loss:  # 평균 매수가 대비 손절 설정.
+    enabled: true  # true=활성, false/0=비활성.
+    percent: 2.0  # 참고값만 해당. 현재 실행 손절 기준에 적용되지 않습니다.
+  take_profit:  # 평균 매수가 대비 익절 설정.
+    enabled: true  # true=활성, false/0=비활성.
+    percent: 4.0  # 참고값만 해당. 현재 실행 익절 기준에 적용되지 않습니다.
+  trailing_stop:  # 고점 대비 되돌림 청산 설정.
+    enabled: true  # true=활성, false/0=비활성.
+    percent: 1.5  # 참고값만 해당. 현재 공통 청산 실행에서 트레일링 기준으로 적용되지 않습니다.
+  reference_entry_price: 0  # 선택형 테스트 기준 진입가. 0이면 가격만으로 위험 조건을 강제 평가하지 않습니다.
+# 호환성 메모: 공식 upstream .kis.yaml 필드와 유사한 구조를 유지하되, 이 프로젝트의 내부 프리셋 엔진이 실행합니다.
+# upstream 출처: https://github.com/koreainvestment/open-trading-api/tree/main/strategy_builder

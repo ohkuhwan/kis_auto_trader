@@ -1,0 +1,11 @@
+# KIS Auto Trader V7.1.6 systemd template. Install via scripts/start_monitoring.sh; do not use /path/to/project literally.
+[Unit]
+Description=Check KIS Auto Trader process every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=kis-auto-trader-watchdog.service
+
+[Install]
+WantedBy=timers.target
