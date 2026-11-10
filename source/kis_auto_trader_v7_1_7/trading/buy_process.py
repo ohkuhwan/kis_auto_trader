@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from typing import Callable, Any
 
 from brokers.kis.client import InsufficientBuyingPowerError
+from trading.orders import AccountOrderLockedError
 
 log = logging.getLogger(__name__)
 
@@ -420,6 +421,10 @@ class BuyProcess:
                         self.store.mark_buy_rejection_block(pick.symbol, reason, datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y%m%d"))
                     update_buy_safety(orders_ok=False, reason="예수금 fallback 2차 주문 결과 불명확/실패; 주문 대사 대기")
                     return result
+            except AccountOrderLockedError as lock_error:
+                update_buy_safety(orders_ok=False, reason=str(lock_error))
+                log.critical("계좌 전체 주문 잠금으로 BUY 제출을 중단합니다: %s", label)
+                return result
             order_log.warning(
                 "BUY 접수 symbol=%s qty=%d mode=%s score=%.2f order=%s "
                 "reserve_per_share=%.2f trades_today_before=%d limit=%d latch=%s paper=%s",
