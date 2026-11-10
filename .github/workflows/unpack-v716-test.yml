@@ -64,11 +64,18 @@ jobs:
                   })
           if not manifest:
               raise SystemExit("No project files extracted")
+          # ZIP archives may omit Unix execute bits; restore executable mode for
+          # project shell entrypoints so the extracted test tree is runnable.
+          executable_shell_scripts = 0
+          for shell_script in dest.rglob("*.sh"):
+              shell_script.chmod(0o755)
+              executable_shell_scripts += 1
           pathlib.Path("source/V7.1.6-EXTRACTION-MANIFEST.json").write_text(
               json.dumps({"archive": archive.name, "files": manifest, "skipped_operational_paths": skipped},
                          ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
           print(f"Extracted files: {len(manifest)}")
           print(f"Skipped operational files: {len(skipped)}")
+          print(f"Executable shell scripts: {executable_shell_scripts}")
           print(f"Manifest SHA256: {hashlib.sha256(pathlib.Path('source/V7.1.6-EXTRACTION-MANIFEST.json').read_bytes()).hexdigest()}")
           PY
 
