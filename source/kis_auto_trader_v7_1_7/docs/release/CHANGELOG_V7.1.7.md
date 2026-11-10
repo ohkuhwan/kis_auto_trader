@@ -34,6 +34,8 @@
 - 부분체결·취소·REST 주문이력 대사
 - 재진입 cooldown, 미체결 관리, WebSocket 체결 worker
 - KRX 정규장 중심 운영
+- TR별 내장 기본 호출 제한기와 공통 제한기를 유지합니다. `KIS_TR_RATE_LIMITS_JSON={}`는 TR 제한 비활성화가 아니라 사용자 재정의가 없다는 의미입니다.
+- 현재 설정의 `ENTRY_MODE=ALL` 및 `STRATEGY_EVALUATION_MODE=ALL`, 주문금액 산정/현금 fallback 정책은 변경하지 않았습니다.
 
 ## 5. 검증 계획
 
