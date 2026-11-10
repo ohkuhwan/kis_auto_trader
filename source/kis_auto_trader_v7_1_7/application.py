@@ -993,6 +993,10 @@ def main() -> None:
         raise SystemExit(".env 필수값 누락: " + ", ".join(missing))
 
     api = KisApi(settings)
+    # 새 모의계좌/API 신청정보가 실제 프로세스에 로드됐는지 비밀값 없이 확인합니다.
+    log.info("KIS_AUTH_CONTEXT paper=%s api_base=%s cano_masked=******%s acnt_prdt_cd=%s hts_id_masked=***%s credential_fingerprint=%s",
+             settings.paper, settings.api_base, settings.cano[-4:], settings.acnt_prdt_cd,
+             settings.hts_id[-2:], api._credential_fingerprint[:12])
     try:
         store = StateStore(settings.state_file)
     except StateRecoveryError as exc:
