@@ -782,6 +782,10 @@ class OrderManager:
             else:
                 data = self.api.order_cash(symbol, side, qty, price=price, market=False)
         except AmbiguousOrderError as exc:
+            # 응답에 계좌 단위 오류코드가 확인되어 callback이 잠금을 발동했다면
+            # 종목별 uncertain 주문으로 오분류하지 않고 계좌 전체 잠금으로 처리합니다.
+            if self.account_order_locked:
+                raise AccountOrderLockedError(self.account_order_lock) from exc
             self._record_uncertain(symbol, side, qty, exc, reservation_price=reservation_price)
             order_log.critical("주문 결과 불명확: symbol=%s side=%s qty=%d; 해당 종목만 대사 대상으로 기록, POST 재전송 금지", symbol_label(symbol), side, qty)
             raise
