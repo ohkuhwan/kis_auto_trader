@@ -55,6 +55,14 @@ jobs:
               sys.exit(1)
           PY
 
+      # Keep the extracted archive byte-for-byte intact. These test-only
+      # fixture adjustments are overlaid only in the ephemeral CI workspace,
+      # after the archive integrity check has completed.
+      - name: Apply test-only fixture overrides
+        run: |
+          cp test-overrides/tests/test_monitoring_scripts.py source/kis_auto_trader_v7_1_6/tests/test_monitoring_scripts.py
+          cp test-overrides/tests/test_v716_improvements.py source/kis_auto_trader_v7_1_6/tests/test_v716_improvements.py
+
       - name: Install test dependencies
         working-directory: source/kis_auto_trader_v7_1_6
         run: |
