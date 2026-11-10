@@ -1,0 +1,202 @@
+digraph KIS_V700 {
+graph [rankdir=TB, bgcolor="#05090f", pad="0.25", nodesep="0.22", ranksep="0.42", splines=ortho, fontname="Noto Sans CJK KR", label="KIS Auto Trader V7.0.0 — 상세 시스템 흐름", labelloc=t, fontsize=22, fontcolor="white"];
+node [shape=box, style="rounded,filled", fillcolor="#07345a", color="#2784bd", fontcolor="#eaf6ff", fontname="Noto Sans CJK KR", fontsize=9, margin="0.12,0.08"];
+edge [color="#6b8499", arrowsize=0.55, penwidth=0.8];
+subgraph cluster_0 { label="1. 시작 · 설정 · 복구"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"A" [label="scripts/start.sh / systemd service"];
+"B" [label="main.py → application.main()"];
+"C" [label="config.settings.load_settings()
+.env 로드 · PAPER/TRADING 분리"];
+"D" [label="config.paths.runtime_paths()
+프로젝트 루트 기준 파일 경로"];
+"E" [label="StateStore · 토큰/주문/취소 파일 경로 준비"];
+"F" [label="storage.state.StateStore
+기존 상태 로드 · 손상 상태는 오류로 처리"];
+"G" [label="storage.holiday.HolidayChecker
+거래일/휴장일 판정"];
+"STOP" [label="신규 시작/매매 차단
+사유 로그 · 알림"];
+"H" [label="KisApi 초기화
+토큰 캐시 · rate limiter · REST"];
+"I" [label="KisRealtime 초기화
+WebSocket 체결/시세 구독"];
+"J" [label="시작 잔고·미체결·주문내역 대사"];
+}
+subgraph cluster_1 { label="2. 주기 루프 · 신규 후보 수집"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"K" [label="application.run_cycle()
+거래시간 · 종료시각 · 일일 위험 게이트"];
+"L" [label="ENTRY_MODE"];
+"M" [label="KisApi.condition_result()
+HTS 저장 조건검색"];
+"N" [label="BUILDER_SYMBOLS_FILE
+config/entry_symbols.txt 목록"];
+"O" [label="HTS 후보 정규화
+중복/잘못된 코드 제거"];
+"P" [label="strategies.builder_engine.official_adapter
+strategy_profiles.yaml + 전략 YAML 10개"];
+"Q" [label="KIS 일봉 조회
+inquire-daily-itemchartprice"];
+"R" [label="전략별 지표/신호 계산
+BUY · HOLD · SELL · ERROR"];
+"S" [label="프로필 투표 집계
+min score · min votes · primary"];
+"T" [label="공통 후보 정렬/중복 제거"];
+"U" [label="시세 최신성 · 급등 추격 · 거래대금/가격
+제외 규칙 및 후보 점수"];
+"V" [label="최종 매수 후보 1개 선택"];
+}
+subgraph cluster_2 { label="3. 매수 안전 게이트 · 주문 접수"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"W" [label="trading.buy_process.BuyProcess
+매수 가능 시간 · 거래 횟수 · 손실 한도"];
+"X" [label="기존 보유/쿨다운/동일 종목 예약 확인"];
+"Y" [label="현금·주문가능금액·예약 현금 확인"];
+"Z" [label="risk/position_sizer.py
+주문 수량/최소 금액 계산"];
+"AA" [label="KIS_ENABLE_TRADING=true?"];
+"DRY" [label="DRY-RUN 기록
+주문 POST 금지"];
+"AB" [label="SubmissionGuard
+종목별 중복 제출 방지"];
+"AC" [label="OrderManager.submit()
+KisApi.order_cash()"];
+"AD" [label="주문 응답 확정?"];
+"AE" [label="uncertain_orders.json
+종목 잠금 · 자동 재전송 금지"];
+"AF" [label="pendingOrder 등록
+주문번호/수량/가격/시간"];
+}
+subgraph cluster_3 { label="4. 보유 감시 · 청산"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"AG" [label="보유 종목 목록/체결 상태 갱신"];
+"AH" [label="실시간 시세 · 체결 통보"];
+"AI" [label="trading.sell_process.SellProcess
+전략 신호 + 손절/익절/트레일링"];
+"AJ" [label="가격 최신성 · 잔고/매도가능수량 확인"];
+"AK" [label="SubmissionGuard · OrderManager.submit()"];
+"AL" [label="매도 응답 확정?"];
+}
+subgraph cluster_4 { label="5. 체결 처리 · 주기 대사"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"AM" [label="trading.fill_handler.FillHandler
+체결 키/누적 수량 중복 방지"];
+"AN" [label="포지션·평균단가·잔여수량 갱신"];
+"AO" [label="storage.state.StateStore 저장
+일일 매수 횟수/손익/쿨다운"];
+"AP" [label="REST 체결/미체결/잔고 대사"];
+"AQ" [label="trading.reconcile.reconcile()
+로컬 주문과 브로커 상태 비교"];
+"AR" [label="상태 일치?"];
+"AS" [label="보수적 잠금 유지
+재조회/운영자 확인"];
+"AT" [label="Telegram 운영 알림
+불명확 주문은 삭제/재전송 금지"];
+}
+subgraph cluster_5 { label="6. 주기·속도·종료 보호"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"BA" [label="SCAN_INTERVAL_SEC 주기"];
+"BB" [label="BALANCE_INTERVAL_SEC 잔고 조회"];
+"BC" [label="ORDER_RECONCILE_INTERVAL_SEC 주문 대사"];
+"BD" [label="초당/분당 호출 상한 · 재시도 지연"];
+"BE" [label="시세 오래됨/연결 끊김 감지"];
+"BF" [label="REST fallback 간격 제한
+시세 불충분 시 신규 주문 보류"];
+"BG" [label="AUTO_SHUTDOWN_TIME 도달?"];
+"BH" [label="신규 매수 차단
+미체결 취소 요청 및 상태 확인"];
+"BI" [label="최종 대사 · 상태 저장 · 로그/알림"];
+}
+subgraph cluster_6 { label="7. 별도 감시 프로세스"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"W1" [label="systemd timer / Proot 예약 루프"];
+"W2" [label="monitoring/watchdog.sh"];
+"W3" [label="거래시간 · 휴장일 · 프로세스 · 잠금 확인"];
+"W4" [label="자동 시작하지 않음
+사유 기록"];
+"W5" [label="scripts/request_start.sh
+서비스 시작 요청"];
+"W6" [label="scripts/stop.sh"];
+"W7" [label="수동 정지 표식 기록"];
+}
+subgraph cluster_7 { label="8. 운영 데이터와 진단 파일"; color="#28495f"; fontcolor="#b9d9ef"; fontsize=11; style="rounded";
+"FILE1" [label="STATE_FILE / json/state.json"];
+"FILE2" [label="KIS_TOKEN_CACHE_FILE"];
+"FILE3" [label="UNCERTAIN_ORDERS_FILE"];
+"FILE4" [label="CANCEL_ORDERS_FILE"];
+"FILE5" [label="HOLIDAY_CACHE_FILE / KIS_PAPER_HOLIDAY_CALENDAR"];
+"FILE6" [label="STRATEGY_SIGNAL_LOG"];
+"FILE7" [label="logs/ 일별 운영/주문/체결 로그"];
+}
+"A" -> "B";
+"B" -> "C";
+"C" -> "D";
+"D" -> "E";
+"E" -> "F";
+"F" -> "G";
+"G" -> "STOP";
+"G" -> "H";
+"H" -> "I";
+"I" -> "J";
+"J" -> "K";
+"K" -> "L";
+"L" -> "M";
+"L" -> "N";
+"M" -> "O";
+"N" -> "P";
+"P" -> "Q";
+"Q" -> "R";
+"R" -> "S";
+"O" -> "T";
+"S" -> "T";
+"T" -> "U";
+"U" -> "V";
+"V" -> "W";
+"W" -> "X";
+"X" -> "Y";
+"Y" -> "Z";
+"Z" -> "AA";
+"AA" -> "DRY";
+"AA" -> "AB";
+"AB" -> "AC";
+"AC" -> "AD";
+"AD" -> "AE";
+"AD" -> "AF";
+"J" -> "AG";
+"I" -> "AH";
+"AG" -> "AI";
+"AH" -> "AI";
+"AI" -> "AJ";
+"AJ" -> "AK";
+"AK" -> "AL";
+"AL" -> "AE";
+"AL" -> "AF";
+"AF" -> "AM";
+"AH" -> "AM";
+"AM" -> "AN";
+"AN" -> "AO";
+"AM" -> "AP";
+"AE" -> "AP";
+"AP" -> "AQ";
+"AQ" -> "AR";
+"AR" -> "AS";
+"AR" -> "AO";
+"AS" -> "AT";
+"K" -> "BA";
+"K" -> "BB";
+"K" -> "BC";
+"H" -> "BD";
+"I" -> "BE";
+"BE" -> "BF";
+"K" -> "BG";
+"BG" -> "K";
+"BG" -> "BH";
+"BH" -> "BI";
+"W1" -> "W2";
+"W2" -> "W3";
+"W3" -> "W4";
+"W3" -> "W5";
+"W6" -> "W7";
+"W7" -> "W2";
+"F" -> "FILE1";
+"H" -> "FILE2";
+"AE" -> "FILE3";
+"AC" -> "FILE4";
+"G" -> "FILE5";
+"R" -> "FILE6";
+"AO" -> "FILE7";
+}

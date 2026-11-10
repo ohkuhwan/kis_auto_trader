@@ -1,0 +1,20 @@
+# KIS Auto Trader V7.1.6 systemd template. Install via scripts/start_monitoring.sh; do not use /path/to/project literally.
+[Unit]
+Description=KIS Auto Trader (paper-first)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/project
+Environment=KIS_SYSTEMD_SERVICE=1
+ExecStart=/path/to/project/scripts/start.sh
+ExecStop=/path/to/project/scripts/stop.sh --trigger systemd
+# Recovery is delegated to watchdog.sh, which enforces manual-stop, KST cutoff,
+# weekday and holiday rules before requesting a new start.
+Restart=no
+KillSignal=SIGTERM
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target
