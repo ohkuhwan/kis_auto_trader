@@ -64,9 +64,7 @@ jobs:
 
       - name: Build release ZIP
         run: |
-          zip -qr "$RUNNER_TEMP/kis_auto_trader_v7_1_7.zip" . \\
-            -x ".env" ".venv/*" "**/.venv/*" "**/__pycache__/*" "**/.pytest_cache/*" \\
-               "logs/*" "json/*" "*.pyc"
+          zip -qr "$RUNNER_TEMP/kis_auto_trader_v7_1_7.zip" . -x ".env" ".venv/*" "**/.venv/*" "**/__pycache__/*" "**/.pytest_cache/*" "logs/*" "json/*" "*.pyc"
 
       - name: Upload release ZIP
         uses: actions/upload-artifact@v4
