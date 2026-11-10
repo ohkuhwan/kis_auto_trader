@@ -285,6 +285,10 @@ class BuyProcess:
             "order": None,
         }
         label = symbol_label(pick.symbol, pick.name)
+        if settings.enable_trading and getattr(self.orders, "account_order_locked", False):
+            update_buy_safety(orders_ok=False, reason="계좌 전체 주문 잠금: 운영자 검증/해제 전 신규 매수 차단")
+            log.warning("계좌 전체 주문 잠금으로 신규 BUY 제출 차단: %s", label)
+            return result
         if settings.enable_trading and stop_event.is_set():
             log.warning("종료 신호 확인: 신규 BUY 제출 차단 symbol=%s", label)
         elif settings.enable_trading and not market_open_window():
