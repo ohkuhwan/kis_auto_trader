@@ -53,7 +53,7 @@ def test_fill_notice_logs_distinguish_duplicate_suppression_from_new_fill():
 
 
 def test_release_version_and_diagnostic_changelog_are_present():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "7.1.6"
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "7.1.7"
     assert (ROOT / "docs/release/CHANGELOG_V7.0.2.md").is_file()
     assert (ROOT / "docs/release/CHANGELOG_V7.1.1.md").is_file()
     assert (ROOT / "docs/release/CHANGELOG_V7.1.2.md").is_file()
