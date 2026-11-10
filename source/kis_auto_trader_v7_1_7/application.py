@@ -401,8 +401,8 @@ def run_cycle(
         log.exception("[%s] HTS 조건검색 결과 조회 실패: condition=%r seq=%s", style, condition_name, seq)
         return None
     if not rows:
-        log.error("[%s] HTS 조건검색 결과 0건: condition=%r seq=%s; 신규 매수 후보 없음",
-                  style, condition_name, seq)
+        log.info("[%s] HTS 조건검색 결과 0건(정상 빈 결과): condition=%r seq=%s; 이번 회차 HTS 후보 없음",
+                 style, condition_name, seq)
         return None
     log.info("[HTS_CONDITION] result_received style=%s condition_name=%r seq=%s rows=%d sample_keys=%s",
              style, condition_name, seq, len(rows), sorted(str(k) for k in rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
@@ -1016,6 +1016,12 @@ def main() -> None:
                      [symbol_label(item) for item in sorted(orders.uncertain_symbols)])
     yaml_engine = YamlStrategyEngine(float(os.getenv("MIN_BUY_SIGNAL_SCORE", "70")))
     telegram = TelegramNotifier()
+    if orders.account_order_locked and orders.mark_account_order_lock_alerted():
+        lock = orders.account_order_lock
+        telegram.send("🚨 KIS 계좌 전체 주문 잠금 복구\n"
+                      f"오류코드={lock.get('msg_cd', 'UNKNOWN')}\n"
+                      f"사유={lock.get('msg1', lock.get('reason', '잠금 파일/계좌 설정 확인 필요'))}\n"
+                      "BUY/SELL 신규 주문은 차단되며 재시작으로 해제되지 않습니다. 계좌/API 신청정보 검증 후 운영자 수동 해제가 필요합니다.")
     holiday_checker = HolidayChecker(api, str(runtime_path("holiday_cache")))
 
     price_cache: dict = {}
@@ -1179,6 +1185,10 @@ def main() -> None:
             buy_safety["reason"] = str(reason)
         elif buy_safety["balance_ok"] and buy_safety["orders_ok"]:
             buy_safety["reason"] = ""
+        # 계좌/인증 오류 잠금은 잔고·미체결 조회가 성공해도 자동 해제하지 않습니다.
+        if orders.account_order_locked:
+            buy_safety["orders_ok"] = False
+            buy_safety["reason"] = "계좌 전체 주문 잠금: KIS 계좌/API 신청정보 확인 및 운영자 해제 필요"
         if not (buy_safety["balance_ok"] and buy_safety["orders_ok"]):
             log.warning(
                 "신규 매수 안전 게이트 차단: balance_ok=%s orders_ok=%s reason=%s",
@@ -1221,7 +1231,7 @@ def main() -> None:
 
     today_key = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
     store.reset_daily_if_needed(today_key)
-    log.info("KIS V7.1.6 시작: paper=%s trading=%s entry_mode=%s source=%s cwd=%s",
+    log.info("KIS V7.1.7 시작: paper=%s trading=%s entry_mode=%s source=%s cwd=%s",
              settings.paper, settings.enable_trading, os.getenv("ENTRY_MODE", "HTS").upper(),
              Path(__file__).resolve(), Path.cwd())
     log.info("START_OUTCOME status=initialized source=%s project_root=%s paper=%s trading=%s",
@@ -1252,16 +1262,16 @@ def main() -> None:
              limiter_stats["configured_sec_limit"], api.limiter.min_interval,
              limiter_stats["configured_min_limit"], settings.max_calls_per_sec, settings.max_calls_per_min)
     log.info("TR별 추가 호출 제한기 활성: %d개 TR (%s)", len(api.tr_limiters), ",".join(sorted(api.tr_limiters)))
-    telegram.send(f"KIS V7.1.6 시작\npaper={settings.paper}\ntrading={settings.enable_trading}")
+    telegram.send(f"KIS V7.1.7 시작\npaper={settings.paper}\ntrading={settings.enable_trading}")
     # 휴장일 API 오류는 영업일로 추정하지 않고 시작을 중단합니다.
     try:
         if not holiday_checker.is_business_day(datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y%m%d")):
             log.warning("오늘은 휴장일입니다. 프로그램을 종료합니다.")
-            telegram.send("KIS V7.1.6: 오늘은 휴장일로 확인되어 종료합니다.")
+            telegram.send("KIS V7.1.7: 오늘은 휴장일로 확인되어 종료합니다.")
             return
     except Exception:
         log.exception("휴장일 확인 실패: 안전을 위해 프로그램 시작 중단")
-        telegram.send("KIS V7.1.6 오류: 휴장일 확인 실패로 안전 종료합니다.")
+        telegram.send("KIS V7.1.7 오류: 휴장일 확인 실패로 안전 종료합니다.")
         raise
 
     # 이전 버전에서 체결 카운터가 누락된 상태로 재시작할 수 있으므로
@@ -1398,6 +1408,12 @@ def main() -> None:
             for deferred_fill in orders.drain_deferred_fill_events():
                 fill_event_queue.put(deferred_fill)
             now = time.time()
+            if orders.account_order_locked and orders.mark_account_order_lock_alerted():
+                lock = orders.account_order_lock
+                telegram.send("🚨 KIS 계좌 전체 주문 잠금 발동\n"
+                              f"오류코드={lock.get('msg_cd', 'UNKNOWN')}\n"
+                              f"사유={lock.get('msg1', lock.get('reason', '계좌/API 신청정보 확인 필요'))}\n"
+                              "BUY/SELL 신규 주문을 즉시 차단했습니다. 잔고·미체결 조회는 계속하며, 계좌 검증 후 운영자 수동 해제만 허용합니다.")
             # WebSocket 재연결은 연결 성공만으로 체결 누락 복구가 보장되지 않으므로
             # generation 변경을 감지하면 주문/체결/잔고 REST 대사를 우선 수행합니다.
             if realtime.connection_generation != last_ws_generation:
@@ -1795,7 +1811,7 @@ def main() -> None:
                     last_scan = now
                 except Exception as exc:
                     log.exception("매매 cycle 오류")
-                    telegram.send(f"KIS V7.1.6 매매 cycle 오류: {type(exc).__name__}: {exc}")
+                    telegram.send(f"KIS V7.1.7 매매 cycle 오류: {type(exc).__name__}: {exc}")
                     last_scan = now
 
             time.sleep(0.2)
@@ -1843,8 +1859,8 @@ def main() -> None:
                 log.exception("프로그램 종료 시 최종 보유주식 조회 실패; 마지막 정상 잔고를 확인하십시오")
                 telegram.send(f"프로그램 종료 보유주식 조회 실패: {type(snapshot_exc).__name__}: {snapshot_exc}")
         log.info("STOP_OUTCOME status=graceful source=%s project_root=%s", Path(__file__).resolve(), Path(__file__).resolve().parent)
-        log.info("KIS V7.1.6 종료")
-        telegram.send("KIS V7.1.6 프로그램 종료")
+        log.info("KIS V7.1.7 종료")
+        telegram.send("KIS V7.1.7 프로그램 종료")
 
 
 if __name__ == "__main__":
