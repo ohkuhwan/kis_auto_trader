@@ -61,6 +61,9 @@ class SellProcess:
         주문/체결/잔고 상태 머신은 기존 OrderManager와 reconcile 함수에 남긴다.
         """
         reconciled_immediately = False
+        if getattr(self.orders, "account_order_locked", False):
+            # 계좌 잠금 중에도 main loop의 REST 잔고/주문 대사는 계속되지만 새 SELL 평가는 제출하지 않습니다.
+            return False
         for symbol in self.store.symbols():
             with self.exit_queue_lock:
                 if symbol in self.exit_queued_symbols:
@@ -226,6 +229,8 @@ class SellProcess:
                 break
             priority, _queued_at, symbol = item
             try:
+                if getattr(self.orders, "account_order_locked", False):
+                    continue
                 pos = self.store.get_position(symbol)
                 if not pos or int(pos.get("qty", 0) or 0) <= 0 or self.orders.pending_for_symbol(symbol):
                     continue
