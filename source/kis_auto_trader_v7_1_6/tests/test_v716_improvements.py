@@ -400,6 +400,12 @@ def test_second_fallback_order_failure_persists_same_day_symbol_block(tmp_path, 
     from storage.state import StateStore
     from trading.buy_process import BuyProcess
 
+    # The production path keys this safety latch by KST date; freeze the test
+    # clock to the same date used by the isolated StateStore fixture.
+    monkeypatch.setattr("trading.buy_process.datetime", SimpleNamespace(
+        now=lambda tz=None: __import__("datetime").datetime(2026, 10, 30, 10, 0, tzinfo=tz)
+    ))
+
     class Orders:
         def __init__(self): self.submitted = []
         def submit(self, symbol, side, qty, **kwargs):
