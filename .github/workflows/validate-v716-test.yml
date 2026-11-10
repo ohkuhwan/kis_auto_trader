@@ -6,13 +6,15 @@ on:
       - archive-unpack-test
     paths:
       - "**"
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   verify-and-test:
-    if: github.ref == 'refs/heads/archive-unpack-test'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout test branch
