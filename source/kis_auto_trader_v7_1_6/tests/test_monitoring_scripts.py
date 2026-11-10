@@ -305,6 +305,7 @@ def test_expired_manual_stop_marker_allows_next_weekday_scheduler_request(tmp_pa
     (project / "scripts/lib").mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / "scripts/lib/log_control.sh", project / "scripts/lib/log_control.sh")
     fakebin = tmp_path / "bin"
+    _install_fake_sudo(fakebin)
     (fakebin / "ps").write_text("#!/usr/bin/env bash\necho systemd\n", encoding="utf-8")
     (fakebin / "ps").chmod(0o755)
     (fakebin / "pgrep").write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
@@ -346,6 +347,7 @@ def test_systemd_manual_stop_uses_unit_manager_and_leaves_marker(tmp_path):
     shutil.copy2(ROOT / "config/paths.py", project / "config/paths.py")
     (project / "config" / "__init__.py").write_text("\"\"\"Isolated config package for shell integration tests.\"\"\"\n", encoding="utf-8")
     fakebin = tmp_path / "bin"; fakebin.mkdir(); _install_stdlib_python(fakebin)
+    _install_fake_sudo(fakebin)
     (fakebin / "ps").write_text("#!/usr/bin/env bash\necho systemd\n", encoding="utf-8"); (fakebin / "ps").chmod(0o755)
     (fakebin / "systemctl").write_text(
         "#!/usr/bin/env bash\n"
