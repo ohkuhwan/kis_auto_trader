@@ -1,6 +1,6 @@
-# KIS Auto Trader V7.1.6 운영 안내
+# KIS Auto Trader V7.1.7 운영 안내
 
-V7.1.6는 **모의투자 우선** 버전입니다. `.env`에서 `KIS_PAPER=true`를 유지하고, 주문 동작을 검증하기 전에는 `KIS_ENABLE_TRADING=false`를 권장합니다.
+V7.1.7은 **모의투자 우선** 버전입니다. `.env`에서 `KIS_PAPER=true`를 유지하고, 주문 동작을 검증하기 전에는 `KIS_ENABLE_TRADING=false`를 권장합니다.
 
 ## 1. 종목 선정과 평가 엔진은 별도 설정입니다
 
@@ -49,7 +49,7 @@ V7.1.6는 **모의투자 우선** 버전입니다. `.env`에서 `KIS_PAPER=true`
 
 `KIS10` 모드에서는 사용자 정의 YAML 파일이 필수 경로가 아닙니다. `CUSTOM`과 `ALL`에서는 진입·청산 YAML이 검증됩니다. 실제 KIS 서버의 API 제한 및 주문·체결 동작은 모의투자에서 별도로 확인하세요.
 
-자세한 변경 사항: [CHANGELOG_V7.1.6.md](docs/release/CHANGELOG_V7.1.6.md)
+자세한 변경 사항: [CHANGELOG_V7.1.7.md](docs/release/CHANGELOG_V7.1.7.md)
 
 
 ## 6. V7.1.6 추가 안전장치
@@ -74,3 +74,42 @@ V7.0.2 진단 로그 검토 기록은 [V7.0.2 로그 검토](docs/validation/V7.
 
 
 자동 모니터링은 KST 08:00 이전에 자동 시작되지 않습니다. 명시적 수동 시작은 이 제한의 대상이 아니며, 평일·휴장일·수동 중지·종료 시각 정책은 그대로 적용됩니다.
+
+## 7. 계좌/API 인증 오류와 영구 주문 잠금 (V7.1.7)
+
+다음 KIS 응답은 종목별 오류가 아니라 계좌 또는 API 신청정보 단위 오류로 취급합니다.
+
+| 오류 코드 | 의미/조치 |
+|---|---|
+| `40910000` | 만료된 모의투자 계좌 등 주문 불가 계좌. 새 모의계좌 발급 및 API 재신청 확인 |
+| `IGW00002` | 인증 시점 계좌번호와 요청 계좌번호 불일치. App Key/Secret과 CANO 연결 확인 |
+| `90070000` | 모의투자 처리계좌 ID와 사용자정보 불일치. HTS ID 변경 여부 및 기존 신청정보 삭제·재신청 확인 |
+
+위 오류가 REST 응답에서 확인되면 `json/account_order_lock.json`에 잠금 상태를 원자 저장합니다. 잠금 중에는 신규 BUY와 SELL 제출을 모두 차단합니다. 프로그램을 재시작해도 잠금은 유지되며, 잔고·미체결·체결 대사는 계속 수행합니다. watchdog는 프로세스가 살아 있어도 `degraded / account_order_lock`로 기록하고 자동 재시작하지 않습니다.
+
+**잠금 해제 전 확인 순서**
+
+1. 프로그램을 중지하고 KIS Developers에서 현재 모의투자 계좌가 Open API 신청정보에 연결되어 있는지 확인합니다.
+2. 새 모의투자 계좌가 국내주식 계좌인지 확인하고, HTS ID·App Key·App Secret·CANO·계좌상품코드가 같은 신청정보를 가리키는지 대조합니다.
+3. 새 계좌에 연결된 App Key/Secret을 `.env`에 반영합니다. App Key/Secret, CANO, 상품코드 또는 HTS ID가 바뀌면 이전 인증 캐시를 재사용하지 않도록 fingerprint가 달라집니다.
+4. 기존 `json/kis_tokens.json`을 백업 후 삭제하거나 이름을 바꿉니다. 프로그램 시작 시 REST 접근 토큰과 WebSocket 승인키를 각각 새로 발급받게 합니다.
+5. 주문 기능을 켜기 전에 REST 잔고 조회가 새 계좌의 보유·예수금으로 응답하는지, WebSocket 연결과 체결통보 구독이 정상인지 확인합니다.
+6. 계좌/API 신청정보 검증이 끝난 경우에만 다음 명령으로 잠금을 수동 해제합니다.
+
+```bash
+python3 scripts/unlock_account_order_lock.py \
+  --confirm-account-verified \
+  --reason "새 모의계좌 API 신청 및 REST·WebSocket 검증 완료"
+```
+
+잠금 파일을 직접 삭제하는 방식은 권장하지 않습니다. 해제 스크립트는 기존 잠금 기록을 보존하고 해제 시각·사유를 기록합니다. 잠금 파일이 손상되었거나 읽을 수 없으면 안전을 위해 주문을 차단합니다.
+
+## 8. HTS 조건검색 결과 0건
+
+- `psearch-title`에서 받은 `seq`를 그대로 사용합니다. `seq="0"`도 유효한 값일 수 있으므로 임의로 거부하지 않습니다.
+- `psearch-result`가 `MCA05918`을 반환하면 KIS 조건검색 결과가 0건인 상태로 정규화합니다. 이를 인증/서버 장애로 오인해 반복 오류로 기록하지 않습니다.
+- 조건명 자체를 찾지 못하거나 응답 구조가 잘못된 경우는 별도 설정/조회 오류로 기록합니다.
+
+## 9. 인증 캐시 범위
+
+REST access token과 WebSocket approval key는 별도로 발급·관리됩니다. 캐시 fingerprint에는 API 환경, App Key, App Secret의 해시, CANO, 계좌상품코드, HTS ID를 포함합니다. 계좌 또는 인증 구성이 바뀌면 이전 캐시가 자동 재사용되지 않습니다. 실제 키·토큰·승인키는 로그에 출력하거나 저장소에 커밋하지 마세요.
